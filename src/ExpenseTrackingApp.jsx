@@ -383,7 +383,7 @@ const ExpenseTrackingApp = () => {
       baseExpenses.reduce((sum, exp) => sum + exp.amount, 0) +
       oneOffs.reduce((sum, exp) => sum + exp.amount, 0);
 
-    // Paid
+    // Paid (includes both 'paid' and 'cleared' status)
     const totalPaid =
       baseExpenses
         .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
@@ -392,13 +392,13 @@ const ExpenseTrackingApp = () => {
         .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
         .reduce((sum, exp) => sum + exp.amount, 0);
 
-    // Unpaid
+    // Unpaid (only pending expenses - 'paid' expenses are considered committed but not yet cleared)
     const unpaidAmount =
       baseExpenses
-        .filter(exp => exp.status === 'pending')
+        .filter(exp => exp.status === 'pending' || exp.status === 'paid')
         .reduce((sum, exp) => sum + exp.amount, 0) +
       oneOffs
-        .filter(exp => exp.status === 'pending')
+        .filter(exp => exp.status === 'pending' || exp.status === 'paid')
         .reduce((sum, exp) => sum + exp.amount, 0);
 
     return {
@@ -987,15 +987,46 @@ const ExpenseTrackingApp = () => {
   // Expense Edit Modal Component
   const ExpenseEditModal = () => {
     const [editedExpense, setEditedExpense] = useState(expenseModal.expense);
+    const [showScopeSelection, setShowScopeSelection] = useState(false);
+    const [editScope, setEditScope] = useState('instance'); // 'instance' or 'template'
 
     useEffect(() => {
       setEditedExpense(expenseModal.expense);
+      setShowScopeSelection(false);
+      setEditScope('instance');
     }, [expenseModal.expense]);
 
     if (!expenseModal.open || !editedExpense) return null;
 
     const handleSave = () => {
-      handleExpenseModalSave(editedExpense);
+      // For one-off expenses, always save as instance
+      if (editedExpense.isOneOff) {
+        handleExpenseModalSave(editedExpense);
+        return;
+      }
+
+      // For recurring expenses, show scope selection
+      setShowScopeSelection(true);
+    };
+
+    const handleScopeConfirm = () => {
+      if (editScope === 'template') {
+        // Update the source expense template (affects future periods)
+        setSourceExpenses(prev => prev.map(exp =>
+          exp.id === editedExpense.id ? { ...editedExpense, active: true } : exp
+        ));
+
+        // Also update this specific instance
+        handleExpenseModalSave(editedExpense);
+
+        triggerCelebration('Expense template updated! All future instances will use the new values 🔄');
+      } else {
+        // Just update this instance
+        handleExpenseModalSave(editedExpense);
+      }
+
+      setShowScopeSelection(false);
+      setExpenseModal({ open: false, expense: null, periodId: null });
     };
 
     const handleDelete = () => {
@@ -1020,11 +1051,83 @@ const ExpenseTrackingApp = () => {
       }
     };
 
+    // Scope selection modal
+    if (showScopeSelection) {
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                <Edit className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">Apply Changes</h3>
+                <p className="text-sm text-gray-600">How should these changes be applied?</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <input
+                  type="radio"
+                  name="editScope"
+                  value="instance"
+                  checked={editScope === 'instance'}
+                  onChange={(e) => setEditScope(e.target.value)}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="font-medium">Just this instance</div>
+                  <div className="text-sm text-gray-600">
+                    Only update this specific occurrence. Future instances will keep the original values.
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <input
+                  type="radio"
+                  name="editScope"
+                  value="template"
+                  checked={editScope === 'template'}
+                  onChange={(e) => setEditScope(e.target.value)}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="font-medium">Adjust moving forward</div>
+                  <div className="text-sm text-gray-600">
+                    Update the template and all future instances. Past instances remain unchanged.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowScopeSelection(false)}
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleScopeConfirm}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Edit Expense</h3>
+            <h3 className="text-lg font-semibold">
+              Edit {editedExpense.isOneOff ? 'One-Off ' : ''}Expense
+            </h3>
             <button
               onClick={() => setExpenseModal({ open: false, expense: null, periodId: null })}
               className="p-2 hover:bg-gray-100 rounded"
