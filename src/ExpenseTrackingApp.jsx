@@ -5,7 +5,6 @@ import {
   Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
-
 const ExpenseTrackingApp = () => {
   // ---------- Capability checks ----------
   const fsSupported = typeof window !== 'undefined' &&
@@ -1012,35 +1011,59 @@ const ExpenseTrackingApp = () => {
 
               {/* Right-side controls */}
               <div className="flex flex-wrap gap-2 items-center">
-                {/* Live file sync controls */}
+                {/* Data controls: prefer live file sync when supported; otherwise fall back to JSON import/export */}
                 {fsSupported ? (
+                  // Browser supports File System Access API (Chrome/Edge desktop).
+                  // Hide Import/Export in this case, per your request.
                   <>
-                    <button onClick={connectSyncFile} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2">
-                      <Upload className="w-4 h-4" /> Connect Sync File
-                    </button>
-                    <button onClick={loadFromSyncFile} className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm">
-                      Load From Sync File
-                    </button>
+                    {!syncHandle && (
+                      <>
+                        <button
+                          onClick={connectSyncFile}
+                          className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2"
+                          title="Pick a JSON in a cloud-synced folder to auto-save into"
+                        >
+                          <Upload className="w-4 h-4" />
+                          Connect Sync File
+                        </button>
+                        <button
+                          onClick={loadFromSyncFile}
+                          className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm"
+                          title="Load existing JSON and enable autosave"
+                        >
+                          Load From Sync File
+                        </button>
+                      </>
+                    )}
+                    {/* When a sync file is connected, we keep these hidden.
+        Autosave status is shown on the line below the header. */}
                   </>
                 ) : (
-                  <div className="text-xs bg-yellow-50 text-yellow-800 border border-yellow-200 rounded px-2 py-1">
-                    Live file sync isn’t supported on this browser. Use Import/Export JSON instead.
+                  // Browser does NOT support File System Access API (Safari/iOS, most mobile).
+                  // Show Import/Export JSON as the fallback.
+                  <div className="flex gap-2">
+                    <button
+                      onClick={exportAppStateJSON}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm"
+                      title="Download current state as JSON"
+                    >
+                      Export State JSON
+                    </button>
+
+                    <label
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer"
+                      title="Import a previously exported JSON file"
+                    >
+                      Import State JSON
+                      <input
+                        type="file"
+                        accept="application/json"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])}
+                      />
+                    </label>
                   </div>
                 )}
-
-                {/* Import/Export state */}
-                <button onClick={exportAppStateJSON} className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm">
-                  Export State JSON
-                </button>
-                <label className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer">
-                  Import State JSON
-                  <input
-                    type="file"
-                    accept="application/json"
-                    className="hidden"
-                    onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])}
-                  />
-                </label>
 
                 {/* Existing features */}
                 <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 bg-gray-600 text-white rounded text-sm flex items-center gap-2">
