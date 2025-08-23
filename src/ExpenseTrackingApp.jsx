@@ -245,9 +245,20 @@ const ExpenseTrackingApp = () => {
   useEffect(() => { saveToStorage('expenseTracker_lastSavedAt', lastSavedAt); }, [lastSavedAt]);
 
   async function writeSyncFile(handle, obj) {
+    console.log('📝 Writing to sync file...', {
+      timestamp: new Date().toISOString(),
+      dataSize: JSON.stringify(obj).length,
+      fileName: handle.name
+    });
+
     const writable = await handle.createWritable();
     await writable.write(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' }));
     await writable.close();
+
+    console.log('📁 Sync file write completed', {
+      timestamp: new Date().toISOString(),
+      fileName: handle.name
+    });
   }
 
   async function readSyncFile(handle) {
@@ -258,18 +269,23 @@ const ExpenseTrackingApp = () => {
 
   async function connectSyncFile() {
     try {
+      console.log('🔗 Connecting to sync file...');
       const handle = await window.showSaveFilePicker({
         suggestedName: 'expense-planner.json',
         types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
       });
+      console.log('📂 Sync file selected:', handle.name);
+
       setSyncHandle(handle);
       await writeSyncFile(handle, packAppState());
       setLastSavedAt(new Date());
       setLastSaveError('');
       triggerCelebration('Sync file connected! Your data will auto-save ✨');
+
+      console.log('✅ Sync file connection completed successfully');
     } catch (e) {
       if (e?.name !== 'AbortError') {
-        console.error(e);
+        console.error('❌ Failed to connect sync file:', e);
         setLastSaveError('Could not connect to file.');
       }
     }
@@ -298,13 +314,30 @@ const ExpenseTrackingApp = () => {
     if (!syncHandle) return;
     // Debounce saves to avoid excessive writes during rapid updates
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+
+    console.log('🔄 State changed, scheduling autosave...', {
+      syncHandle: !!syncHandle,
+      timestamp: new Date().toISOString()
+    });
+
     saveDebounceRef.current = setTimeout(async () => {
       try {
+        console.log('💾 Starting autosave to sync file...', {
+          timestamp: new Date().toISOString(),
+          dataSize: JSON.stringify(packAppState()).length
+        });
+
         await writeSyncFile(syncHandle, packAppState());
-        setLastSavedAt(new Date());
+        const savedAt = new Date();
+        setLastSavedAt(savedAt);
         setLastSaveError('');
+
+        console.log('✅ Autosave completed successfully!', {
+          timestamp: savedAt.toISOString(),
+          lastSavedAt: savedAt
+        });
       } catch (e) {
-        console.error('Autosave failed:', e);
+        console.error('❌ Autosave failed:', e);
         setLastSaveError('Autosave failed (check permissions/storage).');
       }
     }, 600);
@@ -1517,15 +1550,38 @@ const ExpenseTrackingApp = () => {
   };
 
   const ViewControls = () => (
-    <div className="flex flex-wrap gap-2 mb-4">
-      <button onClick={() => setCurrentView('single')} className={`px-3 py-2 rounded text-sm ${currentView === 'single' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Single Period</button>
-      <button onClick={() => setCurrentView('side-by-side')} className={`px-3 py-2 rounded text-sm ${currentView === 'side-by-side' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Side-by-Side</button>
-      <button onClick={() => setCurrentView('dashboard')} className={`px-3 py-2 rounded text-sm ${currentView === 'dashboard' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Dashboard</button>
-      {undoStack.length > 0 && (
-        <button onClick={handleUndo} className="px-3 py-2 bg-yellow-100 text-yellow-700 rounded text-sm hover:bg-yellow-200 flex items-center gap-2">
-          <RotateCcw className="w-4 h-4" /> Undo Move
+    <div className="space-y-3 mb-4">
+      {/* Today's Date */}
+      <div className="flex justify-center">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <div className="text-sm text-blue-600 font-medium text-center">
+            Today: {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* View Controls */}
+      <div className="flex flex-wrap gap-2 justify-center">
+        <button onClick={() => setCurrentView('single')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${currentView === 'single' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+          Single Period
         </button>
-      )}
+        <button onClick={() => setCurrentView('side-by-side')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${currentView === 'side-by-side' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+          Side-by-Side
+        </button>
+        <button onClick={() => setCurrentView('dashboard')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${currentView === 'dashboard' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+          Dashboard
+        </button>
+        {undoStack.length > 0 && (
+          <button onClick={handleUndo} className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg text-sm hover:bg-yellow-200 flex items-center gap-2 font-medium transition-colors">
+            <RotateCcw className="w-4 h-4" /> Undo Move
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -1704,78 +1760,86 @@ const ExpenseTrackingApp = () => {
                 <DollarSign className="w-8 h-8 text-blue-600" /> Expense & Paycheck Planner
               </h1>
 
-              {/* Right-side controls */}
+              {/* Right-side controls - Better organized */}
               <div className="flex flex-wrap gap-2 items-center">
-                {/* Data controls: prefer live file sync when supported; otherwise fall back to JSON import/export */}
-                {fsSupported ? (
-                  // Browser supports File System Access API (Chrome/Edge desktop).
-                  // Hide Import/Export in this case, per your request.
-                  <>
-                    {!syncHandle && (
-                      <>
-                        <button
-                          onClick={connectSyncFile}
-                          className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2"
-                          title="Pick a JSON in a cloud-synced folder to auto-save into"
-                        >
-                          <Upload className="w-4 h-4" />
-                          Connect Sync File
-                        </button>
-                        <button
-                          onClick={loadFromSyncFile}
-                          className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm"
-                          title="Load existing JSON and enable autosave"
-                        >
-                          Load From Sync File
-                        </button>
-                      </>
-                    )}
-                    {/* When a sync file is connected, we keep these hidden.
-        Autosave status is shown on the line below the header. */}
-                  </>
-                ) : (
-                  // Browser does NOT support File System Access API (Safari/iOS, most mobile).
-                  // Show Import/Export JSON as the fallback.
-                  <div className="flex gap-2">
-                    <button
-                      onClick={exportAppStateJSON}
-                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm"
-                      title="Download current state as JSON"
-                    >
-                      Export State JSON
-                    </button>
+                {/* Primary Actions */}
+                <div className="flex gap-2">
+                  <button onClick={() => setShowIncomeSettings(true)} className="px-3 py-2 bg-green-600 text-white rounded text-sm flex items-center gap-2 hover:bg-green-700">
+                    <DollarSign className="w-4 h-4" /> Income Settings
+                  </button>
+                  <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-2 hover:bg-blue-700">
+                    <Edit className="w-4 h-4" /> Manage Expenses
+                  </button>
+                </div>
 
-                    <label
-                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer"
-                      title="Import a previously exported JSON file"
-                    >
-                      Import State JSON
-                      <input
-                        type="file"
-                        accept="application/json"
-                        className="hidden"
-                        onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])}
-                      />
-                    </label>
-                  </div>
-                )}
+                {/* Analytics & Tools */}
+                <div className="flex gap-2">
+                  <button onClick={() => setShowAnalytics(!showAnalytics)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                    <BarChart3 className="w-4 h-4" /> Analytics
+                  </button>
+                  <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                    <Target className="w-4 h-4" /> Debt Tools
+                  </button>
+                </div>
 
-                {/* Existing features */}
-                <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 bg-gray-600 text-white rounded text-sm flex items-center gap-2">
-                  <Edit className="w-4 h-4" /> Manage Expenses
-                </button>
-                <button onClick={() => setShowIncomeSettings(true)} className="px-3 py-2 bg-green-600 text-white rounded text-sm flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" /> Income Settings
-                </button>
-                <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 ${showDebtTools ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                  <Target className="w-4 h-4" /> Debt Tools
-                </button>
-                <button onClick={() => setShowAnalytics(!showAnalytics)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 ${showAnalytics ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                  <BarChart3 className="w-4 h-4" /> Analytics
-                </button>
-                <button onClick={exportToCSV} className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-2">
-                  <Download className="w-4 h-4" /> Export CSV
-                </button>
+                {/* Data Management */}
+                <div className="flex gap-2 border-l pl-2">
+                  {/* Data controls: prefer live file sync when supported; otherwise fall back to JSON import/export */}
+                  {fsSupported ? (
+                    // Browser supports File System Access API (Chrome/Edge desktop).
+                    <>
+                      {!syncHandle && (
+                        <>
+                          <button
+                            onClick={connectSyncFile}
+                            className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700"
+                            title="Pick a JSON in a cloud-synced folder to auto-save into"
+                          >
+                            <Upload className="w-4 h-4" />
+                            Connect Sync File
+                          </button>
+                          <button
+                            onClick={loadFromSyncFile}
+                            className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200"
+                            title="Load existing JSON and enable autosave"
+                          >
+                            Load From Sync File
+                          </button>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    // Browser does NOT support File System Access API (Safari/iOS, most mobile).
+                    <div className="flex gap-2">
+                      <button
+                        onClick={exportAppStateJSON}
+                        className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200"
+                        title="Download current state as JSON"
+                      >
+                        Export State JSON
+                      </button>
+
+                      <label
+                        className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer hover:bg-gray-200"
+                        title="Import a previously exported JSON file"
+                      >
+                        Import State JSON
+                        <input
+                          type="file"
+                          accept="application/json"
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <button onClick={exportToCSV} className="px-3 py-2 bg-teal-600 text-white rounded text-sm flex items-center gap-2 hover:bg-teal-700">
+                    <Download className="w-4 h-4" /> Export CSV
+                  </button>
+                </div>
+
+                {/* Danger Zone */}
                 <button
                   onClick={() => {
                     if (confirm('This will clear all your data and start fresh. Are you sure?')) {
@@ -1783,7 +1847,7 @@ const ExpenseTrackingApp = () => {
                       window.location.reload();
                     }
                   }}
-                  className="px-3 py-2 bg-red-600 text-white rounded text-sm flex items-center gap-2"
+                  className="px-3 py-2 bg-red-600 text-white rounded text-sm flex items-center gap-2 hover:bg-red-700"
                 >
                   <Trash2 className="w-4 h-4" /> Reset
                 </button>
