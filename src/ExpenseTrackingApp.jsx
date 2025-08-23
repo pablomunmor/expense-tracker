@@ -1302,7 +1302,7 @@ const ExpenseTrackingApp = () => {
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <span>{expense.category}</span>
                 {expense.dueDate && (
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-500 text-black font-bold text-xs">
+                  <span className="inline-flex items-center justify-center min-w-[1.75rem] h-7 px-1 rounded-full border-4 border-red-600 bg-white text-black font-bold text-sm">
                     {expense.dueDate}
                   </span>
                 )}
