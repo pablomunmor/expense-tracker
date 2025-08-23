@@ -402,7 +402,8 @@ const ExpenseTrackingApp = () => {
                   ...templateExp,
                   periodId: i,
                   status: exp.status || 'pending',
-                  amountCleared: exp.amountCleared || templateExp.amount
+                  amountCleared: exp.amountCleared || templateExp.amount,
+                  position: exp.position ?? 0
                 };
               }
             }
@@ -413,7 +414,8 @@ const ExpenseTrackingApp = () => {
           const templateExpenses = sourceExpenses.filter(exp =>
             exp.active &&
             exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B') &&
-            !periodExpenses.some(pe => pe.id === exp.id)
+            !periodExpenses.some(pe => pe.id === exp.id) &&
+            !(existingPeriod?.excludedExpenseIds || []).includes(exp.id)
           );
 
           templateExpenses.forEach(exp => {
@@ -422,19 +424,19 @@ const ExpenseTrackingApp = () => {
               periodId: i,
               status: 'pending',
               amountCleared: exp.amount,
-              position: Math.random()
+              position: (periodExpenses.reduce((m, e) => Math.max(m, (e.position ?? -1)), -1) + 1)
             });
           });
         } else {
           // No existing period, generate from template
           periodExpenses = sourceExpenses
             .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
-            .map(exp => ({
+            .map((exp, idx) => ({
               ...exp,
               periodId: i,
               status: 'pending',
               amountCleared: exp.amount,
-              position: Math.random()
+              position: (periodExpenses.reduce((m, e) => Math.max(m, (e.position ?? -1)), -1) + 1)
             }));
         }
 
@@ -448,7 +450,8 @@ const ExpenseTrackingApp = () => {
           expenses: periodExpenses,
           status: 'active',
           // ✅ Preserve existing one-off expenses
-          oneOffExpenses: existingOneOffs
+          oneOffExpenses: existingOneOffs,
+          excludedExpenseIds: existingPeriod?.excludedExpenseIds || []
         });
       }
       return generatedPeriods;
@@ -568,13 +571,10 @@ const ExpenseTrackingApp = () => {
   const moveExpense = (expense, fromPeriodId, direction) => {
     const fromPeriodIndex = periods.findIndex(p => p.id === fromPeriodId);
     const toPeriodIndex = direction === 'forward' ? fromPeriodIndex + 1 : fromPeriodIndex - 1;
-
     if (toPeriodIndex < 0 || toPeriodIndex >= periods.length) return;
 
     const toPeriodId = periods[toPeriodIndex].id;
     const directionText = direction === 'forward' ? 'next' : 'previous';
-
-    if (!confirm(`Move "${expense.description}" to the ${directionText} paycheck?`)) return;
 
     setUndoStack(prev => [...prev.slice(-9), JSON.parse(JSON.stringify(periods))]);
 
@@ -585,20 +585,40 @@ const ExpenseTrackingApp = () => {
 
       if (expense.isOneOff) {
         // Move one-off expense
-        fromPeriod.oneOffExpenses = fromPeriod.oneOffExpenses.filter(e => e.id !== expense.id);
+        fromPeriod.oneOffExpenses = (fromPeriod.oneOffExpenses || []).filter(e => e.id !== expense.id);
+        const oneOffMaxPos = (toPeriod.oneOffExpenses || []).reduce((m, e) => Math.max(m, (e.position ?? -1)), -1);
+        toPeriod.oneOffExpenses = toPeriod.oneOffExpenses || [];
         toPeriod.oneOffExpenses.push({
           ...expense,
           periodId: toPeriodId,
           status: 'pending',
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
+          position: oneOffMaxPos + 1
         });
       } else {
-        // Move regular expense
-        fromPeriod.expenses = fromPeriod.expenses.filter(e => e.id !== expense.id);
+        // Move regular expense (template-based) — only this instance
+        fromPeriod.expenses = (fromPeriod.expenses || []).filter(e => e.id !== expense.id);
+
+        // Mark this period as excluded for this template expense id so it won't be re-injected
+        fromPeriod.excludedExpenseIds = Array.isArray(fromPeriod.excludedExpenseIds) ? fromPeriod.excludedExpenseIds : [];
+        if (!fromPeriod.excludedExpenseIds.includes(expense.id)) {
+          fromPeriod.excludedExpenseIds.push(expense.id);
+        }
+
+        // Ensure destination period allows this id
+        toPeriod.excludedExpenseIds = Array.isArray(toPeriod.excludedExpenseIds) ? toPeriod.excludedExpenseIds : [];
+        toPeriod.excludedExpenseIds = toPeriod.excludedExpenseIds.filter(id => id !== expense.id);
+
+        // Append to destination with stable position
+        const maxPos = (toPeriod.expenses || []).reduce((m, e) => Math.max(m, (e.position ?? -1)), -1);
+        toPeriod.expenses = toPeriod.expenses || [];
         toPeriod.expenses.push({
           ...expense,
           periodId: toPeriodId,
-          status: 'pending'
+          status: 'pending',
+          amountCleared: expense.amount,
+          updatedAt: new Date().toISOString(),
+          position: maxPos + 1
         });
       }
 
@@ -1118,40 +1138,34 @@ const ExpenseTrackingApp = () => {
 
     if (!expenseModal.open || !editedExpense) return null;
 
-    const handleSave = () => {
-      // For one-off expenses, always save as instance
+    const onClose = () => setExpenseModal({ open: false, expense: null, periodId: null });
+
+    const handleSaveClick = () => {
       if (editedExpense.isOneOff) {
         handleExpenseModalSave(editedExpense);
         return;
       }
-
-      // For recurring expenses, show scope selection
       setShowScopeSelection(true);
     };
 
     const handleScopeConfirm = () => {
       if (editScope === 'template') {
-        // Update the source expense template (affects future periods only)
+        // Update template & propagate to current and future periods
         setSourceExpenses(prev => prev.map(exp =>
           exp.id === editedExpense.id ? { ...editedExpense, active: true } : exp
         ));
 
-        // Find current period index
         const currentPeriodIndex = periods.findIndex(p => p.id === expenseModal.periodId);
 
-        // Update this instance AND all future periods with the same expense
         setPeriods(prev => prev.map((period, index) => {
-          // Only update current and future periods
           if (index < currentPeriodIndex) return period;
-
           return {
             ...period,
-            expenses: period.expenses.map(exp =>
+            expenses: (period.expenses || []).map(exp =>
               exp.id === editedExpense.id ? {
                 ...exp,
                 ...editedExpense,
                 periodId: period.id,
-                // Keep original status for future periods, but update current period's status
                 status: index === currentPeriodIndex ? editedExpense.status : 'pending'
               } : exp
             )
@@ -1160,252 +1174,101 @@ const ExpenseTrackingApp = () => {
 
         triggerCelebration('Expense updated for this and all future paychecks! 🔄');
       } else {
-        // Just update this instance
         handleExpenseModalSave(editedExpense);
       }
 
       setShowScopeSelection(false);
-      setExpenseModal({ open: false, expense: null, periodId: null });
+      onClose();
     };
 
     const handleDelete = () => {
-      if (confirm(`Delete "${editedExpense.description}"?`)) {
-        setPeriods(prev => prev.map(period => {
-          if (period.id !== expenseModal.periodId) return period;
-
-          if (editedExpense.isOneOff) {
-            return {
-              ...period,
-              oneOffExpenses: period.oneOffExpenses.filter(e => e.id !== editedExpense.id)
-            };
-          } else {
-            return {
-              ...period,
-              expenses: period.expenses.filter(e => e.id !== editedExpense.id)
-            };
-          }
-        }));
-        setExpenseModal({ open: false, expense: null, periodId: null });
-        triggerCelebration('Expense deleted! 🗑️');
-      }
+      setUndoStack(prev => [...prev.slice(-9), JSON.parse(JSON.stringify(periods))]);
+      setPeriods(prev => prev.map(period => {
+        if (period.id !== expenseModal.periodId) return period;
+        if (editedExpense.isOneOff) {
+          return { ...period, oneOffExpenses: (period.oneOffExpenses || []).filter(e => e.id !== editedExpense.id) };
+        } else {
+          const updated = { ...period, expenses: (period.expenses || []).filter(e => e.id !== editedExpense.id) };
+          updated.excludedExpenseIds = Array.isArray(updated.excludedExpenseIds) ? updated.excludedExpenseIds : [];
+          if (!updated.excludedExpenseIds.includes(editedExpense.id)) updated.excludedExpenseIds.push(editedExpense.id);
+          return updated;
+        }
+      }));
+      triggerCelebration(`Deleted "${editedExpense.description}". You can Undo.`);
+      onClose();
     };
 
-    // Scope selection modal
-    if (showScopeSelection) {
-      return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Edit className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold">Apply Changes</h3>
-                <p className="text-sm text-gray-600">How should these changes be applied?</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 mb-6">
-              <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  name="editScope"
-                  value="instance"
-                  checked={editScope === 'instance'}
-                  onChange={(e) => setEditScope(e.target.value)}
-                  className="mt-1"
-                />
-                <div>
-                  <div className="font-medium">Just this instance</div>
-                  <div className="text-sm text-gray-600">
-                    Only update this specific occurrence. Future instances will keep the original values.
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  name="editScope"
-                  value="template"
-                  checked={editScope === 'template'}
-                  onChange={(e) => setEditScope(e.target.value)}
-                  className="mt-1"
-                />
-                <div>
-                  <div className="font-medium">Adjust moving forward</div>
-                  <div className="text-sm text-gray-600">
-                    Update the template and all future instances. Past instances remain unchanged.
-                  </div>
-                </div>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowScopeSelection(false)}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleScopeConfirm}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" /> Apply Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              Edit {editedExpense.isOneOff ? 'One-Off ' : ''}Expense
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="bg-white rounded-lg p-4 w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-semibold">
+              {editedExpense.isOneOff ? 'Edit One-Off Expense' : 'Edit Expense'}
             </h3>
-            <button
-              onClick={() => setExpenseModal({ open: false, expense: null, periodId: null })}
-              className="p-2 hover:bg-gray-100 rounded"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <button className="p-2 rounded hover:bg-gray-100" onClick={onClose}><X className="w-4 h-4" /></button>
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Description</label>
-              <input
-                type="text"
-                value={editedExpense.description || ''}
-                onChange={(e) => setEditedExpense(prev => ({ ...prev, description: e.target.value }))}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={editedExpense.amount || ''}
-                  onChange={(e) => setEditedExpense(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Category</label>
-                <select
-                  value={editedExpense.category || ''}
-                  onChange={(e) => setEditedExpense(prev => ({ ...prev, category: e.target.value }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Status</label>
-                <select
-                  value={editedExpense.status || 'pending'}
-                  onChange={(e) => setEditedExpense(prev => ({ ...prev, status: e.target.value }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="pending">Pending</option>
-                  <option value="paid">Paid</option>
-                  <option value="cleared">Cleared</option>
-                </select>
-              </div>
-
-              {editedExpense.status === 'cleared' && (
-                <div>
-                  <label className="block text-sm font-medium mb-1">Amount Cleared</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editedExpense.amountCleared || editedExpense.amount}
-                    onChange={(e) => setEditedExpense(prev => ({ ...prev, amountCleared: parseFloat(e.target.value) || 0 }))}
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              )}
-            </div>
-
-            {editedExpense.isDebt && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Balance</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editedExpense.balance || ''}
-                    onChange={(e) => setEditedExpense(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">APR (%)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editedExpense.apr || ''}
-                    onChange={(e) => setEditedExpense(prev => ({ ...prev, apr: parseFloat(e.target.value) || 0 }))}
-                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
+          <div className="space-y-3">
+            <input
+              className="w-full border rounded px-2 py-1"
+              placeholder="Description"
+              value={editedExpense.description || ''}
+              onChange={e => setEditedExpense(prev => ({ ...prev, description: e.target.value }))}
+            />
+            <input
+              type="number"
+              step="0.01"
+              className="w-full border rounded px-2 py-1"
+              placeholder="Amount"
+              value={editedExpense.amount ?? 0}
+              onChange={e => setEditedExpense(prev => ({ ...prev, amount: parseFloat(e.target.value || 0) }))}
+            />
+            {!editedExpense.isOneOff && (
+              <select
+                className="w-full border rounded px-2 py-1"
+                value={editedExpense.status || 'pending'}
+                onChange={e => setEditedExpense(prev => ({ ...prev, status: e.target.value }))}
+              >
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="cleared">Cleared</option>
+              </select>
             )}
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Notes</label>
-              <textarea
-                value={editedExpense.notes || ''}
-                onChange={(e) => setEditedExpense(prev => ({ ...prev, notes: e.target.value }))}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                rows={3}
-                placeholder="Add any notes..."
-              />
-            </div>
           </div>
 
-          <div className="flex justify-between items-center mt-6 pt-4 border-t">
-            <button
-              onClick={handleDelete}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
-            >
+          <div className="mt-4 flex justify-between">
+            <button onClick={handleDelete} className="px-3 py-2 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 flex items-center gap-2">
               <Trash2 className="w-4 h-4" /> Delete
             </button>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setExpenseModal({ open: false, expense: null, periodId: null })}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" /> Save Changes
-              </button>
+            <div className="flex gap-2">
+              <button onClick={onClose} className="px-3 py-2 bg-gray-100 rounded text-sm hover:bg-gray-200">Cancel</button>
+              <button onClick={handleSaveClick} className="px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Save</button>
             </div>
           </div>
+
+          {showScopeSelection && !editedExpense.isOneOff && (
+            <div className="mt-4 p-3 border rounded">
+              <div className="font-medium mb-2">Apply changes to:</div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="scope" value="instance" checked={editScope === 'instance'} onChange={() => setEditScope('instance')} />
+                  Only this paycheck (instance)
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="scope" value="template" checked={editScope === 'template'} onChange={() => setEditScope('template')} />
+                  This and future paychecks (update template)
+                </label>
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
+                <button onClick={() => setShowScopeSelection(false)} className="px-3 py-2 bg-gray-100 rounded text-sm hover:bg-gray-200">Back</button>
+                <button onClick={handleScopeConfirm} className="px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">Confirm</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   };
-
   // ===================== ExpenseItem (COMPLETELY UPDATED) =====================
   const ExpenseItem = ({ expense, periodId }) => {
     const currentPeriodIndex = periods.findIndex(p => p.id === periodId);
@@ -1842,10 +1705,8 @@ const ExpenseTrackingApp = () => {
                 {/* Danger Zone */}
                 <button
                   onClick={() => {
-                    if (confirm('This will clear all your data and start fresh. Are you sure?')) {
-                      localStorage.clear();
-                      window.location.reload();
-                    }
+                    localStorage.clear();
+                    window.location.reload();
                   }}
                   className="px-3 py-2 bg-red-600 text-white rounded text-sm flex items-center gap-2 hover:bg-red-700"
                 >
