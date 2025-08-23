@@ -1,19 +1,28 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- One theme-color is enough -->
     <meta name="theme-color" content="#2563eb" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <!-- ✅ relative paths so they work at /expense-tracker/ -->
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="vite.svg" />
+
+    <!-- Fonts (optional) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <meta name="theme-color" content="#0ea5e9" /> 
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React</title>
+
+    <title>Expense & Paycheck Planner</title>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- ✅ entry must be relative so Vite can rewrite for base path -->
+    <script type="module" src="src/main.jsx"></script>
+    <!-- (No manifest link needed: vite-plugin-pwa injects it) -->
   </body>
 </html>
