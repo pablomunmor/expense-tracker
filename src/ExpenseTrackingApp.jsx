@@ -107,9 +107,26 @@ const ExpenseTrackingApp = () => {
 
   const saveToStorage = (key, value) => {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      // Check if we're approaching localStorage limit
+      const serialized = JSON.stringify(value);
+      if (serialized.length > 5 * 1024 * 1024) { // 5MB warning
+        console.warn(`Large localStorage save for ${key}: ${(serialized.length / 1024 / 1024).toFixed(2)}MB`);
+      }
+      localStorage.setItem(key, serialized);
     } catch (error) {
       console.error(`Error saving ${key} to localStorage:`, error);
+      if (error.name === 'QuotaExceededError') {
+        // Try to free up space by clearing old undo stack
+        if (key !== 'expenseTracker_undoStack') {
+          localStorage.removeItem('expenseTracker_undoStack');
+          try {
+            localStorage.setItem(key, JSON.stringify(value));
+            setUndoStack([]); // Clear undo stack from memory too
+          } catch (retryError) {
+            alert('Storage quota exceeded. Please export your data and refresh the page.');
+          }
+        }
+      }
     }
   };
 
@@ -143,7 +160,7 @@ const ExpenseTrackingApp = () => {
   const [showSourceManagement, setShowSourceManagement] = useState(false);
   const [showIncomeSettings, setShowIncomeSettings] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
-  const [undoStack, setUndoStack] = useState([]);
+  const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
 
   // New state for expense editing modal
@@ -164,6 +181,9 @@ const ExpenseTrackingApp = () => {
     selectedPeriod,
     debtStrategy,
     extraPayment,
+    undoStack,
+    lastSaveError,
+    lastSavedAt,
     version: 1
   });
 
@@ -185,6 +205,9 @@ const ExpenseTrackingApp = () => {
     setSelectedPeriod(Number.isInteger(data.selectedPeriod) ? data.selectedPeriod : 0);
     setDebtStrategy(data.debtStrategy || 'avalanche');
     setExtraPayment(data.extraPayment ?? 0);
+    setUndoStack(Array.isArray(data.undoStack) ? data.undoStack : []);
+    setLastSaveError(data.lastSaveError || '');
+    setLastSavedAt(data.lastSavedAt ? toDate(data.lastSavedAt) : null);
   };
 
   function exportAppStateJSON() {
@@ -211,8 +234,15 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Live file sync (File System Access API) ----------
   const [syncHandle, setSyncHandle] = useState(null);
-  const [lastSaveError, setLastSaveError] = useState('');
-  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [lastSaveError, setLastSaveError] = useState(() => loadFromStorage('expenseTracker_lastSaveError', ''));
+  const [lastSavedAt, setLastSavedAt] = useState(() => {
+    const saved = loadFromStorage('expenseTracker_lastSavedAt', null);
+    return saved ? toDate(saved) : null;
+  });
+
+  // Persist sync state
+  useEffect(() => { saveToStorage('expenseTracker_lastSaveError', lastSaveError); }, [lastSaveError]);
+  useEffect(() => { saveToStorage('expenseTracker_lastSavedAt', lastSavedAt); }, [lastSavedAt]);
 
   async function writeSyncFile(handle, obj) {
     const writable = await handle.createWritable();
@@ -291,6 +321,7 @@ const ExpenseTrackingApp = () => {
   useEffect(() => { saveToStorage('expenseTracker_selectedPeriod', selectedPeriod); }, [selectedPeriod]);
   useEffect(() => { saveToStorage('expenseTracker_debtStrategy', debtStrategy); }, [debtStrategy]);
   useEffect(() => { saveToStorage('expenseTracker_extraPayment', extraPayment); }, [extraPayment]);
+  useEffect(() => { saveToStorage('expenseTracker_undoStack', undoStack); }, [undoStack]);
 
   const categories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Entertainment', 'Healthcare', 'Debt', 'Savings', 'Other'];
 
@@ -311,19 +342,39 @@ const ExpenseTrackingApp = () => {
 
         const isAPaycheck = incomeSettings.firstPaycheckType === 'A' ? i % 2 === 0 : i % 2 === 1;
 
-        const relevantExpenses = sourceExpenses
-          .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
-          .map(exp => ({
-            ...exp,
-            periodId: i,
-            status: 'pending',
-            amountCleared: exp.amount,
-            position: Math.random()
-          }));
-
-        // Check if existing period has one-off expenses to preserve
+        // Check if existing period has expenses with modifications
         const existingPeriod = prevPeriods.find(p => p.id === i);
         const existingOneOffs = existingPeriod?.oneOffExpenses || [];
+
+        const relevantExpenses = sourceExpenses
+          .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
+          .map(exp => {
+            // Check if this expense already exists in the period and has been modified
+            const existingExpense = existingPeriod?.expenses?.find(e => e.id === exp.id);
+
+            if (existingExpense) {
+              // Keep existing expense if it has been individually modified
+              // (different amount, description, status, etc. from the template)
+              const isModified = existingExpense.amount !== exp.amount ||
+                existingExpense.description !== exp.description ||
+                existingExpense.category !== exp.category ||
+                existingExpense.status !== 'pending' ||
+                existingExpense.notes;
+
+              if (isModified) {
+                return existingExpense; // Keep the modified version
+              }
+            }
+
+            // Use template values for new or unmodified expenses
+            return {
+              ...exp,
+              periodId: i,
+              status: 'pending',
+              amountCleared: exp.amount,
+              position: Math.random()
+            };
+          });
 
         generatedPeriods.push({
           id: i,
@@ -503,6 +554,13 @@ const ExpenseTrackingApp = () => {
       triggerCelebration('Undone! 🔄');
     }
   };
+
+  // Limit undo stack size to prevent localStorage bloat
+  useEffect(() => {
+    if (undoStack.length > 10) {
+      setUndoStack(prev => prev.slice(-10));
+    }
+  }, [undoStack]);
 
   // ---------- CRUD helpers ----------
   const handleEditExpense = (expense) => setEditingExpense(expense);
@@ -1011,15 +1069,34 @@ const ExpenseTrackingApp = () => {
 
     const handleScopeConfirm = () => {
       if (editScope === 'template') {
-        // Update the source expense template (affects future periods)
+        // Update the source expense template (affects future periods only)
         setSourceExpenses(prev => prev.map(exp =>
           exp.id === editedExpense.id ? { ...editedExpense, active: true } : exp
         ));
 
-        // Also update this specific instance
-        handleExpenseModalSave(editedExpense);
+        // Find current period index
+        const currentPeriodIndex = periods.findIndex(p => p.id === expenseModal.periodId);
 
-        triggerCelebration('Expense template updated! All future instances will use the new values 🔄');
+        // Update this instance AND all future periods with the same expense
+        setPeriods(prev => prev.map((period, index) => {
+          // Only update current and future periods
+          if (index < currentPeriodIndex) return period;
+
+          return {
+            ...period,
+            expenses: period.expenses.map(exp =>
+              exp.id === editedExpense.id ? {
+                ...exp,
+                ...editedExpense,
+                periodId: period.id,
+                // Keep original status for future periods, but update current period's status
+                status: index === currentPeriodIndex ? editedExpense.status : 'pending'
+              } : exp
+            )
+          };
+        }));
+
+        triggerCelebration('Expense updated for this and all future paychecks! 🔄');
       } else {
         // Just update this instance
         handleExpenseModalSave(editedExpense);
