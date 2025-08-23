@@ -775,7 +775,7 @@ const ExpenseTrackingApp = () => {
 
     return (
       <div
-        className={`bg-white border rounded-lg p-4 mb-4 shadow-sm transition-all ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''
+        className={`bg-white border rounded-lg p-1 mb-4 shadow-sm transition-all ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''
           }`}
         onDragOver={(e) => handleDragOver(e, period.id)}
         onDragLeave={handleDragLeave}
@@ -794,7 +794,7 @@ const ExpenseTrackingApp = () => {
             {formatDate(period.startDate)} – {formatDate(period.endDate)}
           </div>
         </div>
-        
+
         {/* 2) Thin row for Paycheck chip + Net Income */}
         <div className="mt-2 flex items-center justify-between gap-2">
           <span
