@@ -5,6 +5,10 @@ import {
   Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
+
+const SIDE_BY_SIDE_COUNT = 4;
+
+
 const ExpenseTrackingApp = () => {
   // ---------- Capability checks ----------
   const fsSupported = typeof window !== 'undefined' &&
@@ -768,34 +772,73 @@ const ExpenseTrackingApp = () => {
 
   const PeriodHeader = ({ period }) => {
     const totals = calculatePeriodTotals(period);
+
     return (
       <div
-        className={`bg-white border rounded-lg p-4 mb-4 shadow-sm transition-all ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''}`}
-        onDragOver={(e) => handleDragOver(e, period.id)} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, period.id)}
+        className={`bg-white border rounded-lg p-4 mb-4 shadow-sm transition-all ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''
+          }`}
+        onDragOver={(e) => handleDragOver(e, period.id)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, period.id)}
       >
-        <div className="flex justify-between items-start mb-3">
-          <div>
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <span className={`px-2 py-1 rounded text-sm ${period.type === 'A' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>Paycheck {period.type}</span>
-              {formatDate(period.startDate)} - {formatDate(period.endDate)}
-            </h3>
+        {/* Date range */}
+        <div className="text-xs sm:text-sm font-medium text-gray-900 text-center leading-snug">
+          {/* Mobile: stacked */}
+          <div className="sm:hidden">
+            <div>{formatDate(period.startDate)}</div>
+            <div>{formatDate(period.endDate)}</div>
           </div>
+
+          {/* Desktop: inline */}
+          <div className="hidden sm:block">
+            {formatDate(period.startDate)} – {formatDate(period.endDate)}
+          </div>
+        </div>
+        
+        {/* 2) Thin row for Paycheck chip + Net Income */}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span
+            className={`px-2 py-0.5 rounded text-xs font-medium ${period.type === 'A' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+              }`}
+            title={`Paycheck ${period.type}`}
+          >
+            Paycheck {period.type}
+          </span>
+
           <div className="text-right">
-            <div className="text-sm text-gray-600">Net Income</div>
-            <div className={`text-xl font-bold ${totals.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(totals.difference)}</div>
+            <div className="text-[11px] text-gray-600 leading-none">Net Income</div>
+            <div className={`font-bold text-lg sm:text-xl leading-tight ${totals.difference >= 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+              {formatCurrency(totals.difference)}
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div><div className="text-gray-600">Total Income</div><div className="font-semibold text-green-600">{formatCurrency(totals.totalIncome)}</div></div>
-          <div><div className="text-gray-600">Total Expenses</div><div className="font-semibold">{formatCurrency(totals.totalExpenses)}</div></div>
-          <div><div className="text-gray-600">Paid</div><div className="font-semibold text-blue-600">{formatCurrency(totals.totalPaid)}</div></div>
-          <div><div className="text-gray-600">Unpaid</div><div className={`font-semibold ${totals.unpaidAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(totals.unpaidAmount)}</div></div>
+        {/* 3) Vertical metrics list */}
+        <div className="mt-3 divide-y divide-gray-100">
+          <div className="py-1.5 flex items-center justify-between text-sm">
+            <span className="text-gray-600">Total Income</span>
+            <span className="font-semibold text-green-600">{formatCurrency(totals.totalIncome)}</span>
+          </div>
+          <div className="py-1.5 flex items-center justify-between text-sm">
+            <span className="text-gray-600">Total Expenses</span>
+            <span className="font-semibold">{formatCurrency(totals.totalExpenses)}</span>
+          </div>
+          <div className="py-1.5 flex items-center justify-between text-sm">
+            <span className="text-gray-600">Paid</span>
+            <span className="font-semibold text-blue-600">{formatCurrency(totals.totalPaid)}</span>
+          </div>
+          <div className="py-1.5 flex items-center justify-between text-sm">
+            <span className="text-gray-600">Unpaid</span>
+            <span className={`font-semibold ${totals.unpaidAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {formatCurrency(totals.unpaidAmount)}
+            </span>
+          </div>
         </div>
       </div>
     );
   };
-
+    
   const ExpenseItem = ({ expense, periodId }) => (
     <div
       className="bg-white border rounded-lg p-3 hover:shadow-md transition-shadow cursor-move select-none"
@@ -818,11 +861,18 @@ const ExpenseTrackingApp = () => {
           {getStatusIcon(expense.status)} {expense.status.charAt(0).toUpperCase() + expense.status.slice(1)}
         </div>
         <div className="flex gap-1 pointer-events-auto">
-          <button onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'paid'); }} className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors" disabled={expense.status === 'cleared'}>
-            Mark Paid
+          <button
+            onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'paid'); }}
+            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+            disabled={expense.status === 'cleared'}
+          >
+            Paid
           </button>
-          <button onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'cleared'); }} className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors">
-            Mark Cleared
+          <button
+            onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'cleared'); }}
+            className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+          >
+            Cleared
           </button>
         </div>
       </div>
@@ -919,25 +969,65 @@ const ExpenseTrackingApp = () => {
   };
 
   const renderSideBySide = () => {
-    const periodsToShow = periods.slice(selectedPeriod, selectedPeriod + 2);
+    const periodsToShow = periods.slice(selectedPeriod, selectedPeriod + SIDE_BY_SIDE_COUNT);
+
     return (
       <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <button onClick={() => setSelectedPeriod(Math.max(0, selectedPeriod - 2))} disabled={selectedPeriod === 0} className="px-3 py-2 bg-gray-100 rounded disabled:opacity-50">Previous 2</button>
-          <span className="text-sm text-gray-600">Periods {selectedPeriod + 1}-{Math.min(selectedPeriod + 2, periods.length)}</span>
-          <button onClick={() => setSelectedPeriod(Math.min(periods.length - 2, selectedPeriod + 2))} disabled={selectedPeriod >= periods.length - 2} className="px-3 py-2 bg-gray-100 rounded disabled:opacity-50">Next 2</button>
-        </div>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {periodsToShow.map(period => (
-            <div key={period.id} className="space-y-4">
-              <PeriodHeader period={period} />
-              <div className="space-y-3">
-                <h4 className="font-semibold text-sm">Expenses</h4>
-                {period.expenses.map(expense => (<ExpenseItem key={expense.id} expense={expense} periodId={period.id} />))}
-              </div>
+        {/* Responsive header */}
+        <div className="sticky top-2 z-10 bg-gray-50/80 backdrop-blur rounded-md p-2" >
+          <div className="grid grid-cols-2 sm:grid-cols-3 items-center gap-2">
+            {/* Left button */}
+            <div className="order-2 sm:order-1">
+              <button
+                onClick={() => setSelectedPeriod(Math.max(0, selectedPeriod - SIDE_BY_SIDE_COUNT))}
+                disabled={selectedPeriod === 0}
+                className="w-full sm:w-auto px-3 py-2 bg-gray-100 rounded disabled:opacity-50"
+              >
+                Previous {SIDE_BY_SIDE_COUNT}
+              </button>
             </div>
-          ))}
-        </div>
+
+            {/* Center label */}
+            <div className="col-span-2 sm:col-span-1 order-1 sm:order-2 text-center">
+              <span className="text-sm sm:text-base text-gray-700 font-medium">
+                Periods {selectedPeriod + 1}–{Math.min(selectedPeriod + SIDE_BY_SIDE_COUNT, periods.length)}
+              </span>
+            </div>
+
+            {/* Right button */}
+            <div className="order-3 text-right">
+              <button
+                onClick={() =>
+                  setSelectedPeriod(
+                    Math.min(Math.max(0, periods.length - SIDE_BY_SIDE_COUNT), selectedPeriod + SIDE_BY_SIDE_COUNT)
+                  )
+                }
+                disabled={selectedPeriod >= periods.length - SIDE_BY_SIDE_COUNT}
+                className="w-full sm:w-auto px-3 py-2 bg-gray-100 rounded disabled:opacity-50"
+              >
+                Next {SIDE_BY_SIDE_COUNT}
+              </button>
+            </div>
+          </div>
+        </div >
+
+        {/* 4 cycles side by side responsive style. Adjust # of columns at the very top */}
+        <div className="overflow-x-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {periodsToShow.map(period => (
+              <div key={period.id} className="space-y-4">
+                <PeriodHeader period={period} />
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-sm">Expenses</h4>
+                  {period.expenses.map(expense => (
+                    <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>        </div>
+
+        {/* Keep your summary widgets */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DebtSummary />
           <Analytics />
@@ -945,6 +1035,7 @@ const ExpenseTrackingApp = () => {
       </div>
     );
   };
+    
 
   const renderDashboard = () => {
     const periodsToShow = periods.slice(0, 12);
