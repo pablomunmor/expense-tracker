@@ -346,35 +346,64 @@ const ExpenseTrackingApp = () => {
         const existingPeriod = prevPeriods.find(p => p.id === i);
         const existingOneOffs = existingPeriod?.oneOffExpenses || [];
 
-        const relevantExpenses = sourceExpenses
-          .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
-          .map(exp => {
-            // Check if this expense already exists in the period and has been modified
-            const existingExpense = existingPeriod?.expenses?.find(e => e.id === exp.id);
+        // Start with existing expenses if they exist, otherwise generate from template
+        let periodExpenses = [];
 
-            if (existingExpense) {
-              // Keep existing expense if it has been individually modified
-              // (different amount, description, status, etc. from the template)
-              const isModified = existingExpense.amount !== exp.amount ||
-                existingExpense.description !== exp.description ||
-                existingExpense.category !== exp.category ||
-                existingExpense.status !== 'pending' ||
-                existingExpense.notes;
+        if (existingPeriod && existingPeriod.expenses && existingPeriod.expenses.length > 0) {
+          // Keep existing expenses (they may have been moved or modified)
+          periodExpenses = existingPeriod.expenses.map(exp => {
+            // Update template-based properties but keep instance modifications
+            const templateExp = sourceExpenses.find(se => se.id === exp.id && se.active);
+            if (templateExp) {
+              // Only update if this expense hasn't been individually modified
+              const isIndividuallyModified = exp.amount !== templateExp.amount ||
+                exp.description !== templateExp.description ||
+                exp.category !== templateExp.category ||
+                exp.status !== 'pending' ||
+                exp.notes ||
+                exp.periodId !== i; // This indicates it was moved
 
-              if (isModified) {
-                return existingExpense; // Keep the modified version
+              if (!isIndividuallyModified) {
+                // Sync with template
+                return {
+                  ...templateExp,
+                  periodId: i,
+                  status: exp.status || 'pending',
+                  amountCleared: exp.amountCleared || templateExp.amount
+                };
               }
             }
+            return exp; // Keep existing expense as-is (moved or modified)
+          });
 
-            // Use template values for new or unmodified expenses
-            return {
+          // Add any new expenses from template that don't exist in this period
+          const templateExpenses = sourceExpenses.filter(exp =>
+            exp.active &&
+            exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B') &&
+            !periodExpenses.some(pe => pe.id === exp.id)
+          );
+
+          templateExpenses.forEach(exp => {
+            periodExpenses.push({
               ...exp,
               periodId: i,
               status: 'pending',
               amountCleared: exp.amount,
               position: Math.random()
-            };
+            });
           });
+        } else {
+          // No existing period, generate from template
+          periodExpenses = sourceExpenses
+            .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
+            .map(exp => ({
+              ...exp,
+              periodId: i,
+              status: 'pending',
+              amountCleared: exp.amount,
+              position: Math.random()
+            }));
+        }
 
         generatedPeriods.push({
           id: i,
@@ -382,8 +411,8 @@ const ExpenseTrackingApp = () => {
           startDate: new Date(periodDate),
           endDate: new Date(periodDate.getTime() + 14 * 24 * 60 * 60 * 1000),
           defaultIncome: isAPaycheck ? incomeSettings.paycheckA : incomeSettings.paycheckB,
-          additionalIncome: 0,
-          expenses: relevantExpenses,
+          additionalIncome: existingPeriod?.additionalIncome || 0,
+          expenses: periodExpenses,
           status: 'active',
           // ✅ Preserve existing one-off expenses
           oneOffExpenses: existingOneOffs
