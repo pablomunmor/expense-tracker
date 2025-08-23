@@ -2,12 +2,59 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, DollarSign, CreditCard, TrendingUp, Settings, Plus, Minus, BarChart3, Target,
   ArrowUpDown, Check, Clock, AlertTriangle, ChevronDown, ChevronUp, Edit, Trash2, Save, X,
-  Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw
+  Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw, ChevronLeft, ChevronRight,
+  Sparkles, CheckCircle
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
 
 const SIDE_BY_SIDE_COUNT = 4;
 
+// ---- One-off helpers (lightweight; no new libs needed) ----
+const makeId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+function ensureOneOffArray(periods) {
+  // safe-guard so older periods get the new array
+  periods.forEach(p => { if (!p.oneOffExpenses) p.oneOffExpenses = []; });
+}
+
+function addOneOff(periods, setPeriods, periodId, fields) {
+  setPeriods(prev => {
+    const copy = structuredClone(prev);
+    const p = copy.find(x => x.id === periodId);
+    if (!p.oneOffExpenses) p.oneOffExpenses = [];
+    p.oneOffExpenses.push({
+      id: makeId(),
+      isOneOff: true,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      description: '',
+      amount: 0,
+      category: 'Other',
+      notes: '',
+      ...fields
+    });
+    return copy;
+  });
+}
+
+function updateOneOff(periods, setPeriods, periodId, id, patch) {
+  setPeriods(prev => {
+    const copy = structuredClone(prev);
+    const p = copy.find(x => x.id === periodId);
+    const i = (p.oneOffExpenses || []).findIndex(e => e.id === id);
+    if (i >= 0) p.oneOffExpenses[i] = { ...p.oneOffExpenses[i], ...patch, updatedAt: new Date().toISOString() };
+    return copy;
+  });
+}
+
+function deleteOneOff(periods, setPeriods, periodId, id) {
+  setPeriods(prev => {
+    const copy = structuredClone(prev);
+    const p = copy.find(x => x.id === periodId);
+    p.oneOffExpenses = (p.oneOffExpenses || []).filter(e => e.id !== id);
+    return copy;
+  });
+}
 
 const ExpenseTrackingApp = () => {
   // ---------- Capability checks ----------
@@ -45,10 +92,11 @@ const ExpenseTrackingApp = () => {
             ...p,
             startDate: toDate(p.startDate),
             endDate: toDate(p.endDate),
-            expenses: Array.isArray(p.expenses) ? p.expenses.map(e => ({ ...e })) : []
+            expenses: Array.isArray(p.expenses) ? p.expenses.map(e => ({ ...e })) : [],
+            // ✅ Ensure the new field always exists after load
+            oneOffExpenses: Array.isArray(p.oneOffExpenses) ? p.oneOffExpenses.map(e => ({ ...e })) : []
           }));
         }
-
         return parsed;
       }
     } catch (error) {
@@ -95,9 +143,14 @@ const ExpenseTrackingApp = () => {
   const [showSourceManagement, setShowSourceManagement] = useState(false);
   const [showIncomeSettings, setShowIncomeSettings] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
-  const [draggedExpense, setDraggedExpense] = useState(null);
-  const [dragOverPeriod, setDragOverPeriod] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
+  const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
+
+  // New state for expense editing modal
+  const [expenseModal, setExpenseModal] = useState({ open: false, expense: null, periodId: null });
+
+  // Celebration animation state
+  const [celebration, setCelebration] = useState({ show: false, message: '' });
 
   const [debtStrategy, setDebtStrategy] = useState(() => loadFromStorage('expenseTracker_debtStrategy', 'avalanche'));
   const [extraPayment, setExtraPayment] = useState(() => loadFromStorage('expenseTracker_extraPayment', 0));
@@ -120,11 +173,12 @@ const ExpenseTrackingApp = () => {
     setIncomeSettings(data.incomeSettings || incomeSettings);
     const rehydratedPeriods = Array.isArray(data.periods)
       ? data.periods.map(p => ({
-          ...p,
-          startDate: toDate(p.startDate),
-          endDate: toDate(p.endDate),
-          expenses: Array.isArray(p.expenses) ? p.expenses.map(e => ({ ...e })) : []
-        }))
+        ...p,
+        startDate: toDate(p.startDate),
+        endDate: toDate(p.endDate),
+        expenses: Array.isArray(p.expenses) ? p.expenses.map(e => ({ ...e })) : [],
+        oneOffExpenses: Array.isArray(p.oneOffExpenses) ? p.oneOffExpenses.map(e => ({ ...e })) : []
+      }))
       : [];
     setPeriods(rehydratedPeriods);
     setCurrentView(data.currentView || 'single');
@@ -148,7 +202,7 @@ const ExpenseTrackingApp = () => {
       const text = await file.text();
       const data = JSON.parse(text);
       applyAppState(data);
-      alert('Imported app state.');
+      triggerCelebration('Successfully imported your data! 🎉');
     } catch (e) {
       console.error('Import failed:', e);
       alert('Import failed. Please check the file.');
@@ -182,7 +236,7 @@ const ExpenseTrackingApp = () => {
       await writeSyncFile(handle, packAppState());
       setLastSavedAt(new Date());
       setLastSaveError('');
-      alert('Connected to sync file. Autosave enabled on this device.');
+      triggerCelebration('Sync file connected! Your data will auto-save ✨');
     } catch (e) {
       if (e?.name !== 'AbortError') {
         console.error(e);
@@ -200,7 +254,7 @@ const ExpenseTrackingApp = () => {
       const data = await readSyncFile(handle);
       applyAppState(data);
       setLastSaveError('');
-      alert('Loaded state from sync file. Autosave enabled on this device.');
+      triggerCelebration('Data loaded and sync enabled! 🚀');
     } catch (e) {
       if (e?.name !== 'AbortError') {
         console.error(e);
@@ -240,6 +294,12 @@ const ExpenseTrackingApp = () => {
 
   const categories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Entertainment', 'Healthcare', 'Debt', 'Savings', 'Other'];
 
+  // ---------- Celebration helper ----------
+  const triggerCelebration = (message) => {
+    setCelebration({ show: true, message });
+    setTimeout(() => setCelebration({ show: false, message: '' }), 3000);
+  };
+
   // ---------- Period generation ----------
   const generatePeriods = useCallback(() => {
     const generatedPeriods = [];
@@ -260,6 +320,10 @@ const ExpenseTrackingApp = () => {
           position: Math.random()
         }));
 
+      // Check if existing period has one-off expenses to preserve
+      const existingPeriod = periods.find(p => p.id === i);
+      const existingOneOffs = existingPeriod?.oneOffExpenses || [];
+
       generatedPeriods.push({
         id: i,
         type: isAPaycheck ? 'A' : 'B',
@@ -268,22 +332,31 @@ const ExpenseTrackingApp = () => {
         defaultIncome: isAPaycheck ? incomeSettings.paycheckA : incomeSettings.paycheckB,
         additionalIncome: 0,
         expenses: relevantExpenses,
-        status: 'active'
+        status: 'active',
+        // ✅ Preserve existing one-off expenses
+        oneOffExpenses: existingOneOffs
       });
     }
     setPeriods(generatedPeriods);
-  }, [sourceExpenses, incomeSettings]);
+  }, [sourceExpenses, incomeSettings, periods]);
 
-  useEffect(() => { generatePeriods(); }, [generatePeriods]);
+  useEffect(() => {
+    // Ensure one-off arrays exist before generating periods
+    ensureOneOffArray(periods);
+    generatePeriods();
+  }, [generatePeriods]);
 
   useEffect(() => {
     if (periods.length > 0) {
+      // Ensure one-off arrays exist and update income
+      ensureOneOffArray(periods);
       setPeriods(prev => prev.map(period => ({
         ...period,
-        defaultIncome: period.type === 'A' ? incomeSettings.paycheckA : incomeSettings.paycheckB
+        defaultIncome: period.type === 'A' ? incomeSettings.paycheckA : incomeSettings.paycheckB,
+        oneOffExpenses: period.oneOffExpenses || [] // Ensure this always exists
       })));
     }
-  }, [incomeSettings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [incomeSettings]);
 
   // ---------- Utils ----------
   const formatCurrency = (amount) =>
@@ -296,14 +369,36 @@ const ExpenseTrackingApp = () => {
   };
 
   const calculatePeriodTotals = (period) => {
+    // Income stays the same
     const totalIncome = period.defaultIncome + period.additionalIncome;
-    const totalExpenses = period.expenses.reduce((sum, exp) => sum + exp.amount, 0);
-    const totalPaid = period.expenses
-      .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
-      .reduce((sum, exp) => sum + exp.amountCleared, 0);
-    const unpaidAmount = period.expenses
-      .filter(exp => exp.status === 'pending')
-      .reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Make sure both arrays exist
+    const baseExpenses = period.expenses || [];
+    const oneOffs = period.oneOffExpenses || [];
+
+    // Expenses
+    const totalExpenses =
+      baseExpenses.reduce((sum, exp) => sum + exp.amount, 0) +
+      oneOffs.reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Paid
+    const totalPaid =
+      baseExpenses
+        .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
+        .reduce((sum, exp) => sum + (exp.amountCleared ?? exp.amount), 0) +
+      oneOffs
+        .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
+        .reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Unpaid
+    const unpaidAmount =
+      baseExpenses
+        .filter(exp => exp.status === 'pending')
+        .reduce((sum, exp) => sum + exp.amount, 0) +
+      oneOffs
+        .filter(exp => exp.status === 'pending')
+        .reduce((sum, exp) => sum + exp.amount, 0);
+
     return {
       totalIncome,
       totalExpenses,
@@ -354,32 +449,56 @@ const ExpenseTrackingApp = () => {
     return { totalDebt, monthlyPayments, payoffMonths: month, totalInterest, sortedDebts };
   };
 
-  // ---------- DnD ----------
-  const handleDragStart = (e, expense, periodId) => {
-    setDraggedExpense({ expense, fromPeriodId: periodId });
-    e.dataTransfer.effectAllowed = 'move';
-  };
-  const handleDragOver = (e, periodId) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverPeriod(periodId); };
-  const handleDragLeave = () => { setDragOverPeriod(null); };
-  const handleDrop = (e, toPeriodId) => {
-    e.preventDefault();
-    if (!draggedExpense || draggedExpense.fromPeriodId === toPeriodId) { setDraggedExpense(null); setDragOverPeriod(null); return; }
+  // ---------- Move expense between periods ----------
+  const moveExpense = (expense, fromPeriodId, direction) => {
+    const fromPeriodIndex = periods.findIndex(p => p.id === fromPeriodId);
+    const toPeriodIndex = direction === 'forward' ? fromPeriodIndex + 1 : fromPeriodIndex - 1;
+
+    if (toPeriodIndex < 0 || toPeriodIndex >= periods.length) return;
+
+    const toPeriodId = periods[toPeriodIndex].id;
+    const directionText = direction === 'forward' ? 'next' : 'previous';
+
+    if (!confirm(`Move "${expense.description}" to the ${directionText} paycheck?`)) return;
+
     setUndoStack(prev => [...prev.slice(-9), JSON.parse(JSON.stringify(periods))]);
+
     setPeriods(prev => {
-      const newP = [...prev];
-      const fromPeriod = newP.find(p => p.id === draggedExpense.fromPeriodId);
-      fromPeriod.expenses = fromPeriod.expenses.filter(exp => exp.id !== draggedExpense.expense.id);
-      const toPeriod = newP.find(p => p.id === toPeriodId);
-      toPeriod.expenses.push({ ...draggedExpense.expense, periodId: toPeriodId });
-      return newP;
+      const newPeriods = structuredClone(prev);
+      const fromPeriod = newPeriods.find(p => p.id === fromPeriodId);
+      const toPeriod = newPeriods.find(p => p.id === toPeriodId);
+
+      if (expense.isOneOff) {
+        // Move one-off expense
+        fromPeriod.oneOffExpenses = fromPeriod.oneOffExpenses.filter(e => e.id !== expense.id);
+        toPeriod.oneOffExpenses.push({
+          ...expense,
+          periodId: toPeriodId,
+          status: 'pending',
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        // Move regular expense
+        fromPeriod.expenses = fromPeriod.expenses.filter(e => e.id !== expense.id);
+        toPeriod.expenses.push({
+          ...expense,
+          periodId: toPeriodId,
+          status: 'pending'
+        });
+      }
+
+      return newPeriods;
     });
-    setDraggedExpense(null); setDragOverPeriod(null);
+
+    triggerCelebration(`Moved "${expense.description}" to ${directionText} paycheck! 📦`);
   };
+
   const handleUndo = () => {
     if (undoStack.length > 0) {
       const prevState = undoStack[undoStack.length - 1];
       setPeriods(prevState);
       setUndoStack(prev => prev.slice(0, -1));
+      triggerCelebration('Undone! 🔄');
     }
   };
 
@@ -393,7 +512,7 @@ const ExpenseTrackingApp = () => {
     const headers = ['Period', 'Type', 'Date', 'Description', 'Category', 'Amount', 'Status', 'Amount Cleared'];
     const rows = [];
     periods.forEach(period => {
-      period.expenses.forEach(expense => {
+      [...(period.expenses || []), ...(period.oneOffExpenses || [])].forEach(expense => {
         rows.push([
           period.id + 1,
           period.type,
@@ -402,7 +521,7 @@ const ExpenseTrackingApp = () => {
           expense.category,
           expense.amount,
           expense.status,
-          expense.amountCleared
+          expense.amountCleared || expense.amount
         ]);
       });
     });
@@ -425,22 +544,11 @@ const ExpenseTrackingApp = () => {
         })
       };
     }));
-  };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending': return 'text-yellow-600 bg-yellow-50';
-      case 'paid': return 'text-blue-600 bg-blue-50';
-      case 'cleared': return 'text-green-600 bg-green-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'pending': return <Clock className="w-4 h-4" />;
-      case 'paid': return <ArrowUpDown className="w-4 h-4" />;
-      case 'cleared': return <Check className="w-4 h-4" />;
-      default: return <Clock className="w-4 h-4" />;
+    if (newStatus === 'cleared') {
+      triggerCelebration('Expense cleared! ✅');
+    } else if (newStatus === 'paid') {
+      triggerCelebration('Payment recorded! 💳');
     }
   };
 
@@ -457,11 +565,37 @@ const ExpenseTrackingApp = () => {
       monthlyTrends[monthKey].expenses += totals.totalExpenses;
       monthlyTrends[monthKey].difference += totals.difference;
 
-      period.expenses.forEach(exp => {
+      [...(period.expenses || []), ...(period.oneOffExpenses || [])].forEach(exp => {
         categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + exp.amount;
       });
     });
     return { categoryTotals, monthlyTrends };
+  };
+
+  // ---------- Handle expense modal save ----------
+  const handleExpenseModalSave = (updatedExpense) => {
+    setPeriods(prev => prev.map(period => {
+      if (period.id !== expenseModal.periodId) return period;
+
+      if (updatedExpense.isOneOff) {
+        return {
+          ...period,
+          oneOffExpenses: period.oneOffExpenses.map(exp =>
+            exp.id === updatedExpense.id ? { ...updatedExpense, updatedAt: new Date().toISOString() } : exp
+          )
+        };
+      } else {
+        return {
+          ...period,
+          expenses: period.expenses.map(exp =>
+            exp.id === updatedExpense.id ? updatedExpense : exp
+          )
+        };
+      }
+    }));
+
+    setExpenseModal({ open: false, expense: null, periodId: null });
+    triggerCelebration('Expense updated! ✨');
   };
 
   // ---------- UI subcomponents ----------
@@ -553,7 +687,7 @@ const ExpenseTrackingApp = () => {
             <div>
               <div className="text-gray-600">Annual Income After Tax</div>
               <div className="font-bold text-lg">{formatCurrency((tempIncomeSettings.paycheckA) * 26)}</div>
-              <div className="text-xs text-gray-500">(1 Payckeck) × 26 paychecks per year</div>
+              <div className="text-xs text-gray-500">(1 Paycheck) × 26 paychecks per year</div>
             </div>
             <div>
               <div className="text-gray-600">Pay Frequency</div>
@@ -564,7 +698,7 @@ const ExpenseTrackingApp = () => {
         </div>
 
         <div className="flex gap-3">
-          <button onClick={() => { setIncomeSettings(tempIncomeSettings); setShowIncomeSettings(false); }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-semibold">
+          <button onClick={() => { setIncomeSettings(tempIncomeSettings); setShowIncomeSettings(false); triggerCelebration('Income settings saved! 💰'); }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-semibold">
             <Save className="w-4 h-4" /> Save Settings
           </button>
           <button onClick={() => { setTempIncomeSettings(incomeSettings); setShowIncomeSettings(false); }} className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
@@ -579,9 +713,11 @@ const ExpenseTrackingApp = () => {
     const handleFormSave = (formData) => {
       if (editingExpense) {
         setSourceExpenses(prev => prev.map(exp => exp.id === editingExpense.id ? { ...formData, id: editingExpense.id, active: true } : exp));
+        triggerCelebration('Expense template updated! 📝');
       } else {
         const id = Math.max(...sourceExpenses.map(e => e.id), 0) + 1;
         setSourceExpenses(prev => [...prev, { ...formData, id, active: true }]);
+        triggerCelebration('New expense template created! ➕');
       }
       setEditingExpense(null);
     };
@@ -606,7 +742,13 @@ const ExpenseTrackingApp = () => {
           {sourceExpenses.filter(exp => exp.active).map(expense => (
             <div key={expense.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
               <div className="flex-1">
-                <div className="font-medium">{expense.description}</div>
+                <div className="flex items-center gap-2">
+                  <div className="font-medium">{expense.description}</div>
+                  {expense.isOneOff && (
+                    <span className="text-[10px] px-1 rounded bg-gray-100 text-gray-700">One-off</span>
+                  )}
+                </div>
+
                 <div className="text-sm text-gray-600">
                   {expense.category} • Due: {expense.dueDate} • Paycheck {expense.paycheckAssignment}
                   {expense.isDebt && ` • Balance: ${formatCurrency(expense.balance)} @ ${expense.apr}% APR`}
@@ -774,13 +916,7 @@ const ExpenseTrackingApp = () => {
     const totals = calculatePeriodTotals(period);
 
     return (
-      <div
-        className={`bg-white border rounded-lg p-1 mb-4 shadow-sm transition-all ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''
-          }`}
-        onDragOver={(e) => handleDragOver(e, period.id)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, period.id)}
-      >
+      <div className="bg-white border rounded-lg p-1 mb-4 shadow-sm transition-all">
         {/* Date range */}
         <div className="text-xs sm:text-sm font-medium text-gray-900 text-center leading-snug">
           {/* Mobile: stacked */}
@@ -791,9 +927,16 @@ const ExpenseTrackingApp = () => {
 
           {/* Desktop: inline */}
           <div className="hidden sm:block">
-            {formatDate(period.startDate)} – {formatDate(period.endDate)}
+            {formatDate(period.startDate)} — {formatDate(period.endDate)}
           </div>
         </div>
+        {/* add one-off button */}
+        <button
+          onClick={() => setOneOffModal({ open: true, periodId: period.id, editingId: null, fields: { description: '', amount: 0, category: 'Other', status: 'pending', notes: '' } })}
+          className="px-2 py-1 text-xs bg-gray-100 rounded hover:bg-gray-200"
+        >
+          Add One‑Off
+        </button>
 
         {/* 2) Thin row for Paycheck chip + Net Income */}
         <div className="mt-2 flex items-center justify-between gap-2">
@@ -838,46 +981,280 @@ const ExpenseTrackingApp = () => {
       </div>
     );
   };
-    
-  const ExpenseItem = ({ expense, periodId }) => (
-    <div
-      className="bg-white border rounded-lg p-3 hover:shadow-md transition-shadow cursor-move select-none"
-      draggable={true}
-      onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, expense, periodId); }}
-      onDragEnd={(e) => { e.stopPropagation(); }}
-    >
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex-1 pointer-events-none">
-          <div className="font-medium">{expense.description}</div>
-          <div className="text-sm text-gray-600">{expense.category}</div>
-        </div>
-        <div className="text-right pointer-events-none">
-          <div className="font-semibold">{formatCurrency(expense.amount)}</div>
-          {expense.isDebt && <div className="text-xs text-purple-600">Balance: {formatCurrency(expense.balance)}</div>}
+
+  // Expense Edit Modal Component
+  const ExpenseEditModal = () => {
+    const [editedExpense, setEditedExpense] = useState(expenseModal.expense);
+
+    useEffect(() => {
+      setEditedExpense(expenseModal.expense);
+    }, [expenseModal.expense]);
+
+    if (!expenseModal.open || !editedExpense) return null;
+
+    const handleSave = () => {
+      handleExpenseModalSave(editedExpense);
+    };
+
+    const handleDelete = () => {
+      if (confirm(`Delete "${editedExpense.description}"?`)) {
+        setPeriods(prev => prev.map(period => {
+          if (period.id !== expenseModal.periodId) return period;
+
+          if (editedExpense.isOneOff) {
+            return {
+              ...period,
+              oneOffExpenses: period.oneOffExpenses.filter(e => e.id !== editedExpense.id)
+            };
+          } else {
+            return {
+              ...period,
+              expenses: period.expenses.filter(e => e.id !== editedExpense.id)
+            };
+          }
+        }));
+        setExpenseModal({ open: false, expense: null, periodId: null });
+        triggerCelebration('Expense deleted! 🗑️');
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Edit Expense</h3>
+            <button
+              onClick={() => setExpenseModal({ open: false, expense: null, periodId: null })}
+              className="p-2 hover:bg-gray-100 rounded"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Description</label>
+              <input
+                type="text"
+                value={editedExpense.description || ''}
+                onChange={(e) => setEditedExpense(prev => ({ ...prev, description: e.target.value }))}
+                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Amount</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editedExpense.amount || ''}
+                  onChange={(e) => setEditedExpense(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Category</label>
+                <select
+                  value={editedExpense.category || ''}
+                  onChange={(e) => setEditedExpense(prev => ({ ...prev, category: e.target.value }))}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Status</label>
+                <select
+                  value={editedExpense.status || 'pending'}
+                  onChange={(e) => setEditedExpense(prev => ({ ...prev, status: e.target.value }))}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="paid">Paid</option>
+                  <option value="cleared">Cleared</option>
+                </select>
+              </div>
+
+              {editedExpense.status === 'cleared' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Amount Cleared</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedExpense.amountCleared || editedExpense.amount}
+                    onChange={(e) => setEditedExpense(prev => ({ ...prev, amountCleared: parseFloat(e.target.value) || 0 }))}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {editedExpense.isDebt && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Balance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedExpense.balance || ''}
+                    onChange={(e) => setEditedExpense(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">APR (%)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedExpense.apr || ''}
+                    onChange={(e) => setEditedExpense(prev => ({ ...prev, apr: parseFloat(e.target.value) || 0 }))}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Notes</label>
+              <textarea
+                value={editedExpense.notes || ''}
+                onChange={(e) => setEditedExpense(prev => ({ ...prev, notes: e.target.value }))}
+                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                rows={3}
+                placeholder="Add any notes..."
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center mt-6 pt-4 border-t">
+            <button
+              onClick={handleDelete}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setExpenseModal({ open: false, expense: null, periodId: null })}
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Save Changes
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-      <div className="flex justify-between items-center">
-        <div className={`px-2 py-1 rounded-full text-xs flex items-center gap-1 pointer-events-none ${getStatusColor(expense.status)}`}>
-          {getStatusIcon(expense.status)} {expense.status.charAt(0).toUpperCase() + expense.status.slice(1)}
+    );
+  };
+
+  // ===================== ExpenseItem (COMPLETELY UPDATED) =====================
+  const ExpenseItem = ({ expense, periodId }) => {
+    const currentPeriodIndex = periods.findIndex(p => p.id === periodId);
+    const canMoveBack = currentPeriodIndex > 0 && expense.status === 'pending';
+    const canMoveForward = currentPeriodIndex < periods.length - 1 && expense.status === 'pending';
+
+    // Route status updates based on whether it's a one-off
+    const setStatus = (newStatus) => {
+      if (expense.isOneOff) {
+        updateOneOff(periods, setPeriods, periodId, expense.id, { status: newStatus });
+      } else {
+        updateExpenseStatus(periodId, expense.id, newStatus);
+      }
+    };
+
+    return (
+      <div
+        className="bg-white border rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer select-none"
+        onClick={() => setExpenseModal({ open: true, expense, periodId })}
+      >
+        {/* Top row: description + (optional) one-off tag | amount */}
+        <div className="flex justify-between items-start mb-2">
+          <div className="flex-1 pointer-events-none">
+            <div className="flex items-center gap-2">
+              <div className="font-medium">{expense.description}</div>
+              {expense.isOneOff && (
+                <span className="text-[10px] px-1 rounded bg-gray-100 text-gray-700">One-off</span>
+              )}
+            </div>
+            {expense.category && (
+              <div className="text-sm text-gray-600">{expense.category}</div>
+            )}
+          </div>
+
+          <div className="text-right pointer-events-none">
+            <div className="font-semibold">{formatCurrency(expense.amount)}</div>
+            {expense.isDebt && (
+              <div className="text-xs text-purple-600">
+                Balance: {formatCurrency(expense.balance)}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex gap-1 pointer-events-auto">
-          <button
-            onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'paid'); }}
-            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-            disabled={expense.status === 'cleared'}
-          >
-            Paid
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); updateExpenseStatus(periodId, expense.id, 'cleared'); }}
-            className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
-          >
-            Cleared
-          </button>
+
+        {/* Bottom row: actions */}
+        <div className="flex items-center justify-between">
+          {/* Status indicator */}
+          <div className="text-xs text-gray-500">
+            Status: <span className="font-medium capitalize">{expense.status || 'pending'}</span>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-1 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Move buttons - only show for pending expenses */}
+            {canMoveBack && (
+              <button
+                onClick={() => moveExpense(expense, periodId, 'backward')}
+                className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"
+                title="Move to previous paycheck"
+              >
+                <ChevronLeft className="w-3 h-3" />
+              </button>
+            )}
+
+            {canMoveForward && (
+              <button
+                onClick={() => moveExpense(expense, periodId, 'forward')}
+                className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors flex items-center gap-1"
+                title="Move to next paycheck"
+              >
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            )}
+
+            <button
+              onClick={() => setStatus('paid')}
+              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+              disabled={expense.status === 'cleared'}
+            >
+              Paid
+            </button>
+            <button
+              onClick={() => setStatus('cleared')}
+              className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+            >
+              Cleared
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+  // ===================== /ExpenseItem =====================
 
   const DebtSummary = () => {
     const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
@@ -941,6 +1318,18 @@ const ExpenseTrackingApp = () => {
     </div>
   );
 
+  // Celebration Component
+  const CelebrationToast = () => {
+    if (!celebration.show) return null;
+
+    return (
+      <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-bounce">
+        <Sparkles className="w-5 h-5" />
+        <span className="font-medium">{celebration.message}</span>
+      </div>
+    );
+  };
+
   const renderSinglePeriod = () => {
     const period = periods[selectedPeriod];
     if (!period) return null;
@@ -954,9 +1343,11 @@ const ExpenseTrackingApp = () => {
         <PeriodHeader period={period} />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
-            <h4 className="font-semibold mb-3">Expenses (Drag to move between periods)</h4>
+            <h4 className="font-semibold mb-3">Expenses (Click to edit • Use arrows to move between paychecks)</h4>
             <div className="space-y-3">
-              {period.expenses.map(expense => (<ExpenseItem key={expense.id} expense={expense} periodId={period.id} />))}
+              {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
+                <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
+              ))}
             </div>
           </div>
           <div className="space-y-4">
@@ -1019,13 +1410,14 @@ const ExpenseTrackingApp = () => {
                 <PeriodHeader period={period} />
                 <div className="space-y-3">
                   <h4 className="font-semibold text-sm">Expenses</h4>
-                  {period.expenses.map(expense => (
+                  {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
                     <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
                   ))}
                 </div>
               </div>
             ))}
-          </div>        </div>
+          </div>
+        </div>
 
         {/* Keep your summary widgets */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1035,7 +1427,6 @@ const ExpenseTrackingApp = () => {
       </div>
     );
   };
-    
 
   const renderDashboard = () => {
     const periodsToShow = periods.slice(0, 12);
@@ -1066,9 +1457,8 @@ const ExpenseTrackingApp = () => {
             return (
               <div
                 key={period.id}
-                className={`bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer ${dragOverPeriod === period.id ? 'border-blue-500 bg-blue-50' : ''}`}
+                className="bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer"
                 onClick={() => { setSelectedPeriod(period.id); setCurrentView('single'); }}
-                onDragOver={(e) => handleDragOver(e, period.id)} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, period.id)}
               >
                 <div className="flex justify-between items-start mb-3">
                   <span className={`px-2 py-1 rounded text-xs ${period.type === 'A' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{period.type}</span>
@@ -1091,6 +1481,9 @@ const ExpenseTrackingApp = () => {
   // ---------- Render ----------
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Celebration Toast */}
+      <CelebrationToast />
+
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
@@ -1224,6 +1617,53 @@ const ExpenseTrackingApp = () => {
             <div className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"><AdvancedAnalytics /></div>
           </div>
         )}
+
+        {oneOffModal.open && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            onClick={() => setOneOffModal({ open: false, periodId: null, editingId: null, fields: null })}>
+            <div className="bg-white rounded-lg p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+              <h3 className="text-base font-semibold mb-3">
+                {oneOffModal.editingId ? 'Edit One-Off' : 'Add One-Off'}
+              </h3>
+
+              <div className="space-y-3">
+                <input
+                  placeholder="Description"
+                  className="w-full border rounded px-2 py-1"
+                  value={oneOffModal.fields?.description || ''}
+                  onChange={e => setOneOffModal(m => ({ ...m, fields: { ...m.fields, description: e.target.value } }))}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  className="w-full border rounded px-2 py-1"
+                  value={oneOffModal.fields?.amount || ''}
+                  onChange={e => setOneOffModal(m => ({ ...m, fields: { ...m.fields, amount: parseFloat(e.target.value || 0) } }))}
+                />
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button className="px-3 py-2 text-sm bg-gray-100 rounded"
+                  onClick={() => setOneOffModal({ open: false, periodId: null, editingId: null, fields: null })}>
+                  Cancel
+                </button>
+                <button
+                  className="px-3 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-50"
+                  disabled={!oneOffModal.fields?.description || !oneOffModal.fields?.amount}
+                  onClick={() => {
+                    addOneOff(periods, setPeriods, oneOffModal.periodId, oneOffModal.fields);
+                    setOneOffModal({ open: false, periodId: null, editingId: null, fields: null });
+                    triggerCelebration('One-off expense added! 📋');
+                  }}>
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <ExpenseEditModal />
 
         <ViewControls />
 
