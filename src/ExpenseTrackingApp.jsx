@@ -1299,7 +1299,8 @@ const ExpenseTrackingApp = () => {
               )}
             </div>
             {expense.category && (
-              <div className="text-sm text-gray-600">{expense.category}</div>
+              <div className="text-sm text-gray-600">{expense.category}
+                {expense.dueDate && ` • Due ${expense.dueDate}`}</div>
             )}
           </div>
 
