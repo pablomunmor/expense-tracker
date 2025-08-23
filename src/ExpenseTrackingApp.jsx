@@ -302,43 +302,45 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Period generation ----------
   const generatePeriods = useCallback(() => {
-    const generatedPeriods = [];
-    for (let i = 0; i < 24; i++) {
-      const startBase = toDate(incomeSettings.startDate) || new Date();
-      const periodDate = new Date(startBase);
-      periodDate.setDate(startBase.getDate() + (i * 14));
+    setPeriods(prevPeriods => {
+      const generatedPeriods = [];
+      for (let i = 0; i < 24; i++) {
+        const startBase = toDate(incomeSettings.startDate) || new Date();
+        const periodDate = new Date(startBase);
+        periodDate.setDate(startBase.getDate() + (i * 14));
 
-      const isAPaycheck = incomeSettings.firstPaycheckType === 'A' ? i % 2 === 0 : i % 2 === 1;
+        const isAPaycheck = incomeSettings.firstPaycheckType === 'A' ? i % 2 === 0 : i % 2 === 1;
 
-      const relevantExpenses = sourceExpenses
-        .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
-        .map(exp => ({
-          ...exp,
-          periodId: i,
-          status: 'pending',
-          amountCleared: exp.amount,
-          position: Math.random()
-        }));
+        const relevantExpenses = sourceExpenses
+          .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
+          .map(exp => ({
+            ...exp,
+            periodId: i,
+            status: 'pending',
+            amountCleared: exp.amount,
+            position: Math.random()
+          }));
 
-      // Check if existing period has one-off expenses to preserve
-      const existingPeriod = periods.find(p => p.id === i);
-      const existingOneOffs = existingPeriod?.oneOffExpenses || [];
+        // Check if existing period has one-off expenses to preserve
+        const existingPeriod = prevPeriods.find(p => p.id === i);
+        const existingOneOffs = existingPeriod?.oneOffExpenses || [];
 
-      generatedPeriods.push({
-        id: i,
-        type: isAPaycheck ? 'A' : 'B',
-        startDate: new Date(periodDate),
-        endDate: new Date(periodDate.getTime() + 14 * 24 * 60 * 60 * 1000),
-        defaultIncome: isAPaycheck ? incomeSettings.paycheckA : incomeSettings.paycheckB,
-        additionalIncome: 0,
-        expenses: relevantExpenses,
-        status: 'active',
-        // ✅ Preserve existing one-off expenses
-        oneOffExpenses: existingOneOffs
-      });
-    }
-    setPeriods(generatedPeriods);
-  }, [sourceExpenses, incomeSettings, periods]);
+        generatedPeriods.push({
+          id: i,
+          type: isAPaycheck ? 'A' : 'B',
+          startDate: new Date(periodDate),
+          endDate: new Date(periodDate.getTime() + 14 * 24 * 60 * 60 * 1000),
+          defaultIncome: isAPaycheck ? incomeSettings.paycheckA : incomeSettings.paycheckB,
+          additionalIncome: 0,
+          expenses: relevantExpenses,
+          status: 'active',
+          // ✅ Preserve existing one-off expenses
+          oneOffExpenses: existingOneOffs
+        });
+      }
+      return generatedPeriods;
+    });
+  }, [sourceExpenses, incomeSettings]);
 
   useEffect(() => {
     // Ensure one-off arrays exist before generating periods
