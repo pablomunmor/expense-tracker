@@ -1,7 +1,7 @@
-import ExpenseTrackingApp from './ExpenseTrackingApp.jsx'  // Add .jsx
+import ExpenseManager from './features/ExpenseManager/ExpenseManager.jsx'
 
 function App() {
-  return <ExpenseTrackingApp />
+  return <ExpenseManager />
 }
 
 export default App
