@@ -1,4 +1,4 @@
-import ExpenseManager from './features/ExpenseManager/ExpenseManager.jsx'
+import ExpenseManager from './features/ExpenseManager/ExpenseManager.jsx';
 
 function App() {
   return <ExpenseManager />

@@ -18,11 +18,11 @@ describe('calculatePeriodTotals', () => {
         const totals = calculatePeriodTotals(period);
 
         expect(totals.totalIncome).toBe(2100);
-        expect(totals.totalExpenses).toBe(800); // 500 + 250 + 50
-        expect(totals.totalPaid).toBe(550); // 500 (paid) + 50 (cleared)
-        expect(totals.unpaidAmount).toBe(750); // 500 (paid) + 250 (pending)
-        expect(totals.difference).toBe(1300); // 2100 - 800
-        expect(totals.remainingAfterPaid).toBe(1550); // 2100 - 550
+        expect(totals.totalExpenses).toBe(800);
+        expect(totals.totalPaid).toBe(550);
+        expect(totals.unpaidAmount).toBe(750);
+        expect(totals.difference).toBe(1300);
+        expect(totals.remainingAfterPaid).toBe(1550);
     });
 
     it('should handle periods with no expenses', () => {

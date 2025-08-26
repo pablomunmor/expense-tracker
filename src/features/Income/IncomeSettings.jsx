@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useExpenseStore } from '../../store/expenseStore';
-import { formatCurrency, formatDate } from '../../utils/formatting';
+import { formatCurrency } from '../../utils/formatting';
 import { Save } from 'lucide-react';
 
 const IncomeSettings = ({ onClose }) => {
