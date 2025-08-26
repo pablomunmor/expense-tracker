@@ -1,4 +1,4 @@
-import { calculatePeriodTotals } from './calculations';
+import { calculatePeriodTotals } from './calculations.js';
 
 export const getAnalyticsData = (periods) => {
     const categoryTotals = {};

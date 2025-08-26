@@ -1,4 +1,4 @@
-import { formatDate } from './formatting';
+import { formatDate } from './formatting.js';
 
 export const exportToCSV = (periods) => {
     const headers = ['Period', 'Type', 'Date', 'Description', 'Category', 'Amount', 'Status', 'Amount Cleared'];
