@@ -168,6 +168,9 @@ const ExpenseTrackingApp = () => {
   const [expenseModal, setExpenseModal] = useState({ open: false, expense: null, periodId: null });
   const [partialPaymentModal, setPartialPaymentModal] = useState({ open: false, expense: null, periodId: null });
 
+  // Mobile sync modal
+  const [showSyncModal, setShowSyncModal] = useState(false);
+
   // Celebration animation state
   const [celebration, setCelebration] = useState({ show: false, message: '' });
 
@@ -497,20 +500,26 @@ const ExpenseTrackingApp = () => {
     // Make sure both arrays exist
     const baseExpenses = period.expenses || [];
     const oneOffs = period.oneOffExpenses || [];
+    const allExpenses = [...baseExpenses, ...oneOffs];
 
-    // Expenses
-    const totalExpenses =
-      baseExpenses.reduce((sum, exp) => sum + exp.amount, 0) +
-      oneOffs.reduce((sum, exp) => sum + exp.amount, 0);
+    // Expenses should be calculated based on the original amount, not the remaining amount
+    const totalExpenses = allExpenses.reduce((sum, exp) => sum + (exp.originalAmount || exp.amount), 0);
 
-    // Paid (includes both 'paid' and 'cleared' status)
-    const totalPaid =
-      baseExpenses
-        .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
-        .reduce((sum, exp) => sum + (exp.amountCleared ?? exp.amount), 0) +
-      oneOffs
-        .filter(exp => exp.status === 'paid' || exp.status === 'cleared')
-        .reduce((sum, exp) => sum + exp.amount, 0);
+    // Paid totals need to account for partial payments
+    const totalPaid = allExpenses.reduce((sum, exp) => {
+      // If it was cleared, the full original amount is considered paid.
+      if (exp.status === 'cleared') {
+        return sum + (exp.originalAmount || exp.amount);
+      }
+      // If it was marked as 'paid' (e.g. fully paid via partials, or manually),
+      // use the paidAmount if available, otherwise the full amount.
+      if (exp.status === 'paid') {
+        return sum + (exp.paidAmount || exp.originalAmount || exp.amount);
+      }
+      // For pending items, just add any partial payments.
+      return sum + (exp.paidAmount || 0);
+    }, 0);
+
 
     // Unpaid (only pending expenses - 'paid' expenses are considered committed but not yet cleared)
     const unpaidAmount =
@@ -850,6 +859,52 @@ const ExpenseTrackingApp = () => {
           <button onClick={() => { setTempIncomeSettings(incomeSettings); setShowIncomeSettings(false); }} className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
             Cancel
           </button>
+        </div>
+      </div>
+    );
+  };
+
+  const SyncModal = () => {
+    if (!showSyncModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSyncModal(false)}>
+        <div className="bg-white rounded-lg p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Sync Data</h3>
+            <button onClick={() => setShowSyncModal(false)} className="p-2 hover:bg-gray-100 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">
+            To sync across devices, first <strong>Download</strong> your data file. Save it to a shared cloud folder (like iCloud or Google Drive). Then, on your other device, <strong>Upload</strong> it from that folder.
+          </p>
+          <div className="flex flex-col gap-4">
+            <button
+              onClick={() => {
+                exportAppStateJSON();
+                setShowSyncModal(false);
+                triggerCelebration('Data downloaded!');
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+            >
+              <Download className="w-5 h-5" /> Download Data
+            </button>
+            <label className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold cursor-pointer hover:bg-gray-200">
+              <Upload className="w-5 h-5" /> Upload Data
+              <input
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) {
+                    importAppStateJSON(e.target.files[0]);
+                  }
+                  setShowSyncModal(false);
+                }}
+              />
+            </label>
+          </div>
         </div>
       </div>
     );
@@ -1931,15 +1986,9 @@ const ExpenseTrackingApp = () => {
                     )}
                   </>
                 ) : (
-                  <div className="flex gap-2">
-                    <button onClick={exportAppStateJSON} className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200">
-                      Export
-                    </button>
-                    <label className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer hover:bg-gray-200">
-                      Import
-                      <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])} />
-                    </label>
-                  </div>
+                  <button onClick={() => setShowSyncModal(true)} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700">
+                    <Upload className="w-4 h-4" /> Sync
+                  </button>
                 )}
                  <button
                   onClick={() => {
@@ -2047,6 +2096,7 @@ const ExpenseTrackingApp = () => {
 
         <ExpenseEditModal />
         <PartialPaymentModal />
+        <SyncModal />
 
         <ViewControls />
 
