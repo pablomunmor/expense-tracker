@@ -6,6 +6,7 @@ import {
   Sparkles, CheckCircle
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
+import PaycheckCalculator from './PaycheckCalculator';
 
 const SIDE_BY_SIDE_COUNT = 4;
 
@@ -153,6 +154,7 @@ const ExpenseTrackingApp = () => {
   const [editingExpense, setEditingExpense] = useState(null);
   const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
+  const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
 
   // --- Onboarding (first-time only) ---
   const [showOnboarding, setShowOnboarding] = useState(() =>
@@ -1964,6 +1966,9 @@ const ExpenseTrackingApp = () => {
                 <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
                   <Target className="w-4 h-4" /> Debt Tools
                 </button>
+                <button onClick={() => setShowPaycheckCalculator(true)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showPaycheckCalculator ? 'bg-green-100 text-green-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Calculator className="w-4 h-4" /> Calculator
+                </button>
               </nav>
               <div className="flex items-center gap-2 border-l pl-4">
                 {fsSupported ? (
@@ -2045,6 +2050,10 @@ const ExpenseTrackingApp = () => {
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"><AdvancedAnalytics /></div>
           </div>
+        )}
+
+        {showPaycheckCalculator && (
+          <PaycheckCalculator onClose={() => setShowPaycheckCalculator(false)} />
         )}
 
         {oneOffModal.open && (
