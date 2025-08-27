@@ -47,15 +47,6 @@ function updateOneOff(periods, setPeriods, periodId, id, patch) {
   });
 }
 
-function deleteOneOff(periods, setPeriods, periodId, id) {
-  setPeriods(prev => {
-    const copy = structuredClone(prev);
-    const p = copy.find(x => x.id === periodId);
-    p.oneOffExpenses = (p.oneOffExpenses || []).filter(e => e.id !== id);
-    return copy;
-  });
-}
-
 const ExpenseTrackingApp = () => {
   // ---------- Capability checks ----------
   const fsSupported = typeof window !== 'undefined' &&
@@ -122,7 +113,7 @@ const ExpenseTrackingApp = () => {
           try {
             localStorage.setItem(key, JSON.stringify(value));
             setUndoStack([]); // Clear undo stack from memory too
-          } catch (retryError) {
+          } catch {
             alert('Storage quota exceeded. Please export your data and refresh the page.');
           }
         }
@@ -441,7 +432,7 @@ const ExpenseTrackingApp = () => {
           // No existing period, generate from template
           periodExpenses = sourceExpenses
             .filter(exp => exp.active && exp.paycheckAssignment === (isAPaycheck ? 'A' : 'B'))
-            .map((exp, idx) => ({
+            .map((exp) => ({
               ...exp,
               periodId: i,
               status: 'pending',
@@ -472,6 +463,7 @@ const ExpenseTrackingApp = () => {
     // Ensure one-off arrays exist before generating periods
     ensureOneOffArray(periods);
     generatePeriods();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generatePeriods]);
 
   useEffect(() => {
@@ -484,6 +476,7 @@ const ExpenseTrackingApp = () => {
         oneOffExpenses: period.oneOffExpenses || [] // Ensure this always exists
       })));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomeSettings]);
 
   // ---------- Utils ----------
@@ -1140,11 +1133,12 @@ const ExpenseTrackingApp = () => {
     const [showScopeSelection, setShowScopeSelection] = useState(false);
     const [editScope, setEditScope] = useState('instance'); // 'instance' or 'template'
 
+    const { expense } = expenseModal;
     useEffect(() => {
-      setEditedExpense(expenseModal.expense);
+      setEditedExpense(expense);
       setShowScopeSelection(false);
       setEditScope('instance');
-    }, [expenseModal.expense]);
+    }, [expense]);
 
     if (!expenseModal.open || !editedExpense) return null;
 
