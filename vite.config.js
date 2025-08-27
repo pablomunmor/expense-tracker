@@ -3,8 +3,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
-  base: '/expense-tracker/',   // important for GitHub Pages project sites
+export default defineConfig(({ command }) => ({
+  base: command === 'serve' ? '/' : '/expense-tracker/',
   plugins: [
     react(),
     VitePWA({
@@ -26,5 +26,11 @@ export default defineConfig({
         ]
       }
     })
-  ]
-})
+  ],
+  server: {
+    hmr: {
+      port: 5173,
+    },
+    strictPort: true,
+  }
+}))
