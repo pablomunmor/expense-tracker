@@ -155,6 +155,7 @@ const ExpenseTrackingApp = () => {
   const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // --- Onboarding (first-time only) ---
   const [showOnboarding, setShowOnboarding] = useState(() =>
@@ -731,21 +732,33 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Handle expense modal save ----------
   const handleExpenseModalSave = (updatedExpense) => {
+    const expenseToSave = { ...updatedExpense };
+
+    // If status is being reverted to pending, reset payment fields
+    if (expenseToSave.status === 'pending') {
+      if (expenseToSave.originalAmount) {
+        expenseToSave.amount = expenseToSave.originalAmount;
+      }
+      expenseToSave.paidAmount = 0;
+      expenseToSave.amountCleared = 0;
+      delete expenseToSave.originalAmount;
+    }
+
     setPeriods(prev => prev.map(period => {
       if (period.id !== expenseModal.periodId) return period;
 
-      if (updatedExpense.isOneOff) {
+      if (expenseToSave.isOneOff) {
         return {
           ...period,
-          oneOffExpenses: period.oneOffExpenses.map(exp =>
-            exp.id === updatedExpense.id ? { ...updatedExpense, updatedAt: new Date().toISOString() } : exp
+          oneOffExpenses: (period.oneOffExpenses || []).map(exp =>
+            exp.id === expenseToSave.id ? { ...expenseToSave, updatedAt: new Date().toISOString() } : exp
           )
         };
       } else {
         return {
           ...period,
-          expenses: period.expenses.map(exp =>
-            exp.id === updatedExpense.id ? updatedExpense : exp
+          expenses: (period.expenses || []).map(exp =>
+            exp.id === expenseToSave.id ? expenseToSave : exp
           )
         };
       }
@@ -972,10 +985,9 @@ const ExpenseTrackingApp = () => {
   const DebtPayoffTools = () => {
     const [localExtraPayment, setLocalExtraPayment] = useState(String(extraPayment));
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         setLocalExtraPayment(String(extraPayment));
-    }, [extraPayment]);
+    }, []);
 
     const handleBlur = () => {
         const value = parseFloat(localExtraPayment);
@@ -2011,9 +2023,33 @@ const ExpenseTrackingApp = () => {
             </div>
              {/* Mobile Menu Button */}
             <div className="md:hidden">
-                {/* I can add a hamburger menu here later if needed */}
+                <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 rounded-md text-gray-700 hover:bg-gray-100">
+                    <Calculator className="w-6 h-6" />
+                </button>
             </div>
           </div>
+           {/* Mobile Menu Panel */}
+          {isMobileMenuOpen && (
+            <div className="md:hidden">
+              <nav className="flex flex-col gap-2 pt-2 pb-4 border-t">
+                <button onClick={() => {setShowIncomeSettings(true); setIsMobileMenuOpen(false);}} className="px-3 py-2 text-base font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" /> Income
+                </button>
+                <button onClick={() => {setShowSourceManagement(true); setIsMobileMenuOpen(false);}} className="px-3 py-2 text-base font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <Edit className="w-4 h-4" /> Expenses
+                </button>
+                <button onClick={() => {setShowAnalytics(!showAnalytics); setIsMobileMenuOpen(false);}} className={`px-3 py-2 text-base font-medium rounded-md flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-100 text-purple-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <BarChart3 className="w-4 h-4" /> Analytics
+                </button>
+                <button onClick={() => {setShowDebtTools(!showDebtTools); setIsMobileMenuOpen(false);}} className={`px-3 py-2 text-base font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Target className="w-4 h-4" /> Debt Tools
+                </button>
+                <button onClick={() => {setShowPaycheckCalculator(true); setIsMobileMenuOpen(false);}} className={`px-3 py-2 text-base font-medium rounded-md flex items-center gap-2 transition-colors ${showPaycheckCalculator ? 'bg-green-100 text-green-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Calculator className="w-4 h-4" /> Calculator
+                </button>
+              </nav>
+            </div>
+          )}
            {/* Autosave status line - moved inside for better layout control */}
             {syncHandle && (
               <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
