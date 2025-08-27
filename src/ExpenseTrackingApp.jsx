@@ -731,21 +731,45 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Handle expense modal save ----------
   const handleExpenseModalSave = (updatedExpense) => {
+    const originalExpense = expenseModal.expense;
+    let finalExpense = { ...updatedExpense, updatedAt: new Date().toISOString() };
+
+    // The modal's "amount" field represents the total amount.
+    // Compare it to the original total to see if it changed.
+    const originalTotalAmount = originalExpense.originalAmount || originalExpense.amount;
+
+    if (finalExpense.amount !== originalTotalAmount) {
+      // If the total amount was changed, we must reset this instance's partial
+      // payment history to prevent data inconsistency (e.g., paid > new total).
+      finalExpense.paidAmount = 0;
+      finalExpense.originalAmount = null; // The `amount` field is now the source of truth.
+      // If status was paid/cleared, it's now pending since the total is different.
+      if (finalExpense.status === 'paid' || finalExpense.status === 'cleared') {
+        finalExpense.status = 'pending';
+      }
+    } else {
+      // If the total amount is unchanged, we must restore the original partial
+      // payment data, because the modal editor flattened it for the UI.
+      finalExpense.amount = originalExpense.amount;
+      finalExpense.originalAmount = originalExpense.originalAmount;
+      finalExpense.paidAmount = originalExpense.paidAmount;
+    }
+
     setPeriods(prev => prev.map(period => {
       if (period.id !== expenseModal.periodId) return period;
 
-      if (updatedExpense.isOneOff) {
+      if (finalExpense.isOneOff) {
         return {
           ...period,
-          oneOffExpenses: period.oneOffExpenses.map(exp =>
-            exp.id === updatedExpense.id ? { ...updatedExpense, updatedAt: new Date().toISOString() } : exp
+          oneOffExpenses: (period.oneOffExpenses || []).map(exp =>
+            exp.id === finalExpense.id ? finalExpense : exp
           )
         };
       } else {
         return {
           ...period,
-          expenses: period.expenses.map(exp =>
-            exp.id === updatedExpense.id ? updatedExpense : exp
+          expenses: (period.expenses || []).map(exp =>
+            exp.id === finalExpense.id ? finalExpense : exp
           )
         };
       }
@@ -1210,13 +1234,23 @@ const ExpenseTrackingApp = () => {
 
   // Expense Edit Modal Component
   const ExpenseEditModal = () => {
-    const [editedExpense, setEditedExpense] = useState(expenseModal.expense);
+    const [editedExpense, setEditedExpense] = useState(null); // Initialized empty
     const [showScopeSelection, setShowScopeSelection] = useState(false);
     const [editScope, setEditScope] = useState('instance'); // 'instance' or 'template'
 
     const { expense } = expenseModal;
     useEffect(() => {
-      setEditedExpense(expense);
+      if (expense) {
+        // When the modal opens, we want the "Amount" field to represent the
+        // expense's total value, not the remaining amount after partial payments.
+        // We create a temporary, flattened object for editing.
+        setEditedExpense({
+          ...expense,
+          amount: expense.originalAmount || expense.amount,
+        });
+      } else {
+        setEditedExpense(null);
+      }
       setShowScopeSelection(false);
       setEditScope('instance');
     }, [expense]);
