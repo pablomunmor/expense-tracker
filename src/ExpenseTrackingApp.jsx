@@ -166,6 +166,7 @@ const ExpenseTrackingApp = () => {
 
   // New state for expense editing modal
   const [expenseModal, setExpenseModal] = useState({ open: false, expense: null, periodId: null });
+  const [partialPaymentModal, setPartialPaymentModal] = useState({ open: false, expense: null, periodId: null });
 
   // Celebration animation state
   const [celebration, setCelebration] = useState({ show: false, message: '' });
@@ -912,6 +913,22 @@ const ExpenseTrackingApp = () => {
   };
 
   const DebtPayoffTools = () => {
+    const [localExtraPayment, setLocalExtraPayment] = useState(String(extraPayment));
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        setLocalExtraPayment(String(extraPayment));
+    }, [extraPayment]);
+
+    const handleBlur = () => {
+        const value = parseFloat(localExtraPayment);
+        if (!isNaN(value)) {
+            setExtraPayment(value);
+        } else {
+            setExtraPayment(0);
+        }
+    };
+
     const payoffData = calculateDebtPayoff();
     return (
       <div className="bg-white border rounded-lg p-6">
@@ -948,7 +965,14 @@ const ExpenseTrackingApp = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Extra Monthly Payment</label>
-                <input type="number" value={extraPayment} onChange={(e) => setExtraPayment(e.target.value)} className="w-full p-2 border rounded" placeholder="0.00" />
+                <input
+                    type="number"
+                    value={localExtraPayment}
+                    onChange={(e) => setLocalExtraPayment(e.target.value)}
+                    onBlur={handleBlur}
+                    className="w-full p-2 border rounded"
+                    placeholder="0.00"
+                />
               </div>
             </div>
           </div>
@@ -1273,11 +1297,125 @@ const ExpenseTrackingApp = () => {
       </div>
     );
   };
+
+  const PartialPaymentModal = () => {
+    const { open, expense, periodId } = partialPaymentModal;
+    const [amount, setAmount] = useState('');
+
+    useEffect(() => {
+        if (open) {
+            setAmount(''); // Reset amount on open
+        }
+    }, [open]);
+
+    if (!open || !expense) return null;
+
+    const remainingAmount = expense.originalAmount ? expense.originalAmount - (expense.paidAmount || 0) : expense.amount;
+
+    const handleSave = () => {
+      const paymentAmount = parseFloat(amount);
+      if (isNaN(paymentAmount) || paymentAmount <= 0 || paymentAmount > remainingAmount) {
+        alert('Please enter a valid amount that does not exceed the remaining balance.');
+        return;
+      }
+
+      setPeriods(prevPeriods => {
+        const newPeriods = structuredClone(prevPeriods);
+        const period = newPeriods.find(p => p.id === periodId);
+
+        const update = (exp) => {
+            if (exp.id === expense.id) {
+                const originalAmount = exp.originalAmount || exp.amount;
+                const paidAmount = (exp.paidAmount || 0) + paymentAmount;
+                const newAmount = originalAmount - paidAmount;
+
+                return {
+                    ...exp,
+                    originalAmount: originalAmount,
+                    paidAmount: paidAmount,
+                    amount: newAmount,
+                    status: newAmount <= 0.001 ? 'paid' : 'pending' // Use a small epsilon for float comparison
+                };
+            }
+            return exp;
+        };
+
+        if (expense.isOneOff) {
+            if (!period.oneOffExpenses) period.oneOffExpenses = [];
+            period.oneOffExpenses = period.oneOffExpenses.map(update);
+        } else {
+            if (!period.expenses) period.expenses = [];
+            period.expenses = period.expenses.map(update);
+        }
+
+        return newPeriods;
+      });
+
+      triggerCelebration('Partial payment recorded! 💰');
+      handleClose();
+    };
+
+    const handleClose = () => {
+      setPartialPaymentModal({ open: false, expense: null, periodId: null });
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={handleClose}>
+        <div className="bg-white rounded-lg p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <h3 className="text-lg font-semibold mb-4">Make a Partial Payment</h3>
+          <div className="mb-4">
+            <p className="text-sm text-gray-600">{expense.description}</p>
+            <p className="text-2xl font-bold">{formatCurrency(remainingAmount)}</p>
+            <p className="text-sm text-gray-500">Remaining</p>
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium">Payment Amount</label>
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="0.00"
+              autoFocus
+            />
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <button onClick={handleClose} className="px-4 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
+            <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Save Payment</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ===================== ExpenseItem (COMPLETELY UPDATED) =====================
   const ExpenseItem = ({ expense, periodId }) => {
     const currentPeriodIndex = periods.findIndex(p => p.id === periodId);
     const canMoveBack = currentPeriodIndex > 0 && expense.status === 'pending';
     const canMoveForward = currentPeriodIndex < periods.length - 1 && expense.status === 'pending';
+
+    // Date calculation
+    const period = periods.find(p => p.id === periodId);
+    let dueDateStr = '';
+    if (period && expense.dueDate) {
+      const periodStart = toDate(period.startDate);
+      const expenseDay = expense.dueDate;
+
+      let dueMonth = periodStart.getMonth();
+      let dueYear = periodStart.getFullYear();
+
+      if (expenseDay < periodStart.getDate()) {
+        dueMonth += 1;
+        if (dueMonth > 11) {
+          dueMonth = 0;
+          dueYear += 1;
+        }
+      }
+      const dueDate = new Date(dueYear, dueMonth, expenseDay);
+      dueDateStr = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
 
     // Route status updates based on whether it's a one-off
     const setStatus = (newStatus) => {
@@ -1305,10 +1443,20 @@ const ExpenseTrackingApp = () => {
             {expense.category && (
               <div className="text-sm text-gray-600">{expense.category}</div>
             )}
+            {dueDateStr && (
+              <div className="text-xs text-gray-500 pt-1 flex items-center gap-1">
+                <Clock className="w-3 h-3" /> Due {dueDateStr}
+              </div>
+            )}
           </div>
 
           <div className="text-right pointer-events-none">
             <div className="font-semibold">{formatCurrency(expense.amount)}</div>
+            {expense.originalAmount && (
+                <div className="text-xs text-gray-500">
+                    of {formatCurrency(expense.originalAmount)}
+                </div>
+            )}
             {expense.isDebt && (
               <div className="text-xs text-purple-600">
                 Balance: {formatCurrency(expense.balance)}
@@ -1348,11 +1496,11 @@ const ExpenseTrackingApp = () => {
             )}
 
             <button
-              onClick={() => setStatus('paid')}
+              onClick={() => setPartialPaymentModal({ open: true, expense, periodId })}
               className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-              disabled={expense.status === 'cleared'}
+              disabled={expense.status === 'cleared' || expense.status === 'paid'}
             >
-              Paid
+              Pay
             </button>
             <button
               onClick={() => setStatus('cleared')}
@@ -1740,117 +1888,88 @@ const ExpenseTrackingApp = () => {
       <CelebrationToast />
 
       {/* Header */}
-      <div className="bg-white border-b shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-between items-center">
-              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <DollarSign className="w-8 h-8 text-blue-600" /> Expense & Paycheck Planner
-              </h1>
-
-              {/* Right-side controls - Better organized */}
-              <div className="flex flex-wrap gap-2 items-center">
-                {/* Primary Actions */}
-                <div className="flex gap-2">
-                  <button onClick={() => setShowIncomeSettings(true)} className="px-3 py-2 bg-green-600 text-white rounded text-sm flex items-center gap-2 hover:bg-green-700">
-                    <DollarSign className="w-4 h-4" /> Income Settings
-                  </button>
-                  <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-2 hover:bg-blue-700">
-                    <Edit className="w-4 h-4" /> Manage Expenses
-                  </button>
-                </div>
-
-                {/* Analytics & Tools */}
-                <div className="flex gap-2">
-                  <button onClick={() => setShowAnalytics(!showAnalytics)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                    <BarChart3 className="w-4 h-4" /> Analytics
-                  </button>
-                  <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                    <Target className="w-4 h-4" /> Debt Tools
-                  </button>
-                </div>
-
-                {/* Data Management */}
-                <div className="flex gap-2 border-l pl-2">
-                  {/* Data controls: prefer live file sync when supported; otherwise fall back to JSON import/export */}
-                  {fsSupported ? (
-                    // Browser supports File System Access API (Chrome/Edge desktop).
-                    <>
-                      {!syncHandle && (
-                        <>
-                          <button
-                            onClick={connectSyncFile}
-                            className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700"
-                            title="Pick a JSON in a cloud-synced folder to auto-save into"
-                          >
-                            <Upload className="w-4 h-4" />
-                            Connect Sync File
-                          </button>
-                          <button
-                            onClick={loadFromSyncFile}
-                            className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200"
-                            title="Load existing JSON and enable autosave"
-                          >
-                            Load From Sync File
-                          </button>
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    // Browser does NOT support File System Access API (Safari/iOS, most mobile).
-                    <div className="flex gap-2">
-                      <button
-                        onClick={exportAppStateJSON}
-                        className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200"
-                        title="Download current state as JSON"
-                      >
-                        Export State JSON
-                      </button>
-
-                      <label
-                        className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer hover:bg-gray-200"
-                        title="Import a previously exported JSON file"
-                      >
-                        Import State JSON
-                        <input
-                          type="file"
-                          accept="application/json"
-                          className="hidden"
-                          onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])}
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  <button onClick={exportToCSV} className="px-3 py-2 bg-teal-600 text-white rounded text-sm flex items-center gap-2 hover:bg-teal-700">
-                    <Download className="w-4 h-4" /> Export CSV
-                  </button>
-                </div>
-
-                {/* Danger Zone */}
-                <button
+      <header className="bg-white border-b shadow-sm sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex justify-between items-center py-3">
+            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <DollarSign className="w-7 h-7 text-blue-600" />
+              <span>Expense Planner</span>
+            </h1>
+            <div className="hidden md:flex items-center gap-4">
+              <nav className="flex items-center gap-2">
+                <button onClick={() => setShowIncomeSettings(true)} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" /> Income
+                </button>
+                <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <Edit className="w-4 h-4" /> Expenses
+                </button>
+                <button onClick={() => setShowAnalytics(!showAnalytics)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-100 text-purple-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <BarChart3 className="w-4 h-4" /> Analytics
+                </button>
+                <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Target className="w-4 h-4" /> Debt Tools
+                </button>
+              </nav>
+              <div className="flex items-center gap-2 border-l pl-4">
+                {fsSupported ? (
+                  <>
+                    {!syncHandle ? (
+                      <>
+                        <button onClick={connectSyncFile} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700" title="Pick a JSON in a cloud-synced folder to auto-save into">
+                          <Upload className="w-4 h-4" /> Connect Sync
+                        </button>
+                        <button onClick={loadFromSyncFile} className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200" title="Load existing JSON and enable autosave">
+                          Load
+                        </button>
+                      </>
+                    ) : (
+                       <div className="text-xs text-gray-600 flex items-center gap-3">
+                         <span>Autosaving...</span>
+                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
+                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+                       </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={exportAppStateJSON} className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200">
+                      Export
+                    </button>
+                    <label className="px-3 py-2 bg-gray-100 text-gray-700 rounded text-sm cursor-pointer hover:bg-gray-200">
+                      Import
+                      <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && importAppStateJSON(e.target.files[0])} />
+                    </label>
+                  </div>
+                )}
+                 <button
                   onClick={() => {
-                    localStorage.clear();
-                    window.location.reload();
+                    if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
+                      localStorage.clear();
+                      window.location.reload();
+                    }
                   }}
-                  className="px-3 py-2 bg-red-600 text-white rounded text-sm flex items-center gap-2 hover:bg-red-700"
+                  className="p-2 text-gray-500 hover:bg-red-100 hover:text-red-600 rounded-full"
+                  title="Reset All Data"
                 >
-                  <Trash2 className="w-4 h-4" /> Reset
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
-
-            {/* Autosave status line */}
+             {/* Mobile Menu Button */}
+            <div className="md:hidden">
+                {/* I can add a hamburger menu here later if needed */}
+            </div>
+          </div>
+           {/* Autosave status line - moved inside for better layout control */}
             {syncHandle && (
-              <div className="text-xs text-gray-600 flex items-center gap-3">
+              <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
                 <span>Autosaving to connected file…</span>
                 {lastSavedAt && <span className="text-green-700">Last saved: {formatDate(lastSavedAt)}</span>}
                 {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
               </div>
             )}
-          </div>
         </div>
-      </div>
+      </header>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
@@ -1927,6 +2046,7 @@ const ExpenseTrackingApp = () => {
         {showOnboarding && <OnboardingModal onClose={closeOnboarding} />}
 
         <ExpenseEditModal />
+        <PartialPaymentModal />
 
         <ViewControls />
 
@@ -1934,6 +2054,9 @@ const ExpenseTrackingApp = () => {
         {currentView === 'side-by-side' && renderSideBySide()}
         {currentView === 'dashboard' && renderDashboard()}
       </div>
+      <footer className="text-center py-4 text-gray-500 text-sm">
+        Created with &lt;3 <a href="https://www.pablocmunoz.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700">Pablo Munoz</a>
+      </footer>
     </div>
   );
 };
