@@ -172,6 +172,7 @@ const ExpenseTrackingApp = () => {
 
   // Mobile sync modal
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Celebration animation state
   const [celebration, setCelebration] = useState({ show: false, message: '' });
@@ -1410,6 +1411,9 @@ const ExpenseTrackingApp = () => {
         return;
       }
 
+      // Add to undo stack before making the change
+      setUndoStack(prev => [...prev.slice(-9), JSON.parse(JSON.stringify(periods))]);
+
       setPeriods(prevPeriods => {
         const newPeriods = structuredClone(prevPeriods);
         const period = newPeriods.find(p => p.id === periodId);
@@ -2043,11 +2047,74 @@ const ExpenseTrackingApp = () => {
                 </button>
               </div>
             </div>
-             {/* Mobile Menu Button */}
+            {/* Mobile Menu Button */}
             <div className="md:hidden">
-                {/* I can add a hamburger menu here later if needed */}
+              <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 rounded-md text-gray-700 hover:bg-gray-100">
+                <Menu className="w-6 h-6" />
+              </button>
             </div>
           </div>
+
+          {/* Mobile Menu Dropdown */}
+          {isMobileMenuOpen && (
+            <div className="md:hidden pt-2 pb-4 border-t">
+              <nav className="flex flex-col gap-2 mb-4">
+                <button onClick={() => { setShowIncomeSettings(true); setIsMobileMenuOpen(false); }} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" /> Income
+                </button>
+                <button onClick={() => { setShowSourceManagement(true); setIsMobileMenuOpen(false); }} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
+                  <Edit className="w-4 h-4" /> Expenses
+                </button>
+                <button onClick={() => { setShowAnalytics(!showAnalytics); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-100 text-purple-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <BarChart3 className="w-4 h-4" /> Analytics
+                </button>
+                <button onClick={() => { setShowDebtTools(!showDebtTools); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Target className="w-4 h-4" /> Debt Tools
+                </button>
+                <button onClick={() => { setShowPaycheckCalculator(true); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showPaycheckCalculator ? 'bg-green-100 text-green-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                  <Calculator className="w-4 h-4" /> Calculator
+                </button>
+              </nav>
+              <div className="flex flex-col items-center gap-2 border-t pt-4">
+                {fsSupported ? (
+                  <>
+                    {!syncHandle ? (
+                      <>
+                        <button onClick={connectSyncFile} className="w-full px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center justify-center gap-2 hover:bg-indigo-700" title="Pick a JSON in a cloud-synced folder to auto-save into">
+                          <Upload className="w-4 h-4" /> Connect Sync
+                        </button>
+                        <button onClick={loadFromSyncFile} className="w-full px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200" title="Load existing JSON and enable autosave">
+                          Load
+                        </button>
+                      </>
+                    ) : (
+                       <div className="text-xs text-gray-600 flex items-center gap-3">
+                         <span>Autosaving...</span>
+                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
+                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+                       </div>
+                    )}
+                  </>
+                ) : (
+                  <button onClick={() => setShowSyncModal(true)} className="w-full px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center justify-center gap-2 hover:bg-indigo-700">
+                    <Upload className="w-4 h-4" /> Sync
+                  </button>
+                )}
+                 <button
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
+                      localStorage.clear();
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full p-2 text-gray-500 hover:bg-red-100 hover:text-red-600 rounded-md flex items-center justify-center gap-2"
+                  title="Reset All Data"
+                >
+                  <Trash2 className="w-4 h-4" /> Reset All Data
+                </button>
+              </div>
+            </div>
+          )}
            {/* Autosave status line - moved inside for better layout control */}
             {syncHandle && (
               <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
