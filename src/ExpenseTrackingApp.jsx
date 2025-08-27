@@ -985,9 +985,10 @@ const ExpenseTrackingApp = () => {
   const DebtPayoffTools = () => {
     const [localExtraPayment, setLocalExtraPayment] = useState(String(extraPayment));
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         setLocalExtraPayment(String(extraPayment));
-    }, []);
+    }, [extraPayment]);
 
     const handleBlur = () => {
         const value = parseFloat(localExtraPayment);
