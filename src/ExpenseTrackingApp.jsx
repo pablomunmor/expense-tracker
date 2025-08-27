@@ -155,7 +155,7 @@ const ExpenseTrackingApp = () => {
   const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  main
 
   // --- Onboarding (first-time only) ---
   const [showOnboarding, setShowOnboarding] = useState(() =>
