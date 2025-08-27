@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, DollarSign, CreditCard, TrendingUp, Settings, Plus, Minus, BarChart3, Target,
   ArrowUpDown, Check, Clock, AlertTriangle, ChevronDown, ChevronUp, Edit, Trash2, Save, X,
-  Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw, ChevronLeft, ChevronRight,
+  Download, Upload, Zap, Calculator, PieChart, LineChart, Menu, RotateCcw, ChevronLeft, ChevronRight,
   Sparkles, CheckCircle
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
