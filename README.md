@@ -6,47 +6,58 @@ A comprehensive **React + Vite + Tailwind PWA** for managing bi-weekly paychecks
 
 ## Features
 
-- Bi-weekly paycheck planning with A/B templates  
-- Income and expense management with categories  
-- Drag & drop expense management between pay periods  
-- Debt payoff calculator (Avalanche & Snowball strategies)  
-- Analytics dashboard for category breakdowns & monthly trends  
-- Persistence: localStorage + optional JSON sync (desktop browsers)  
-- CSV export for reports/backups  
-- Installable PWA (works offline once loaded)  
+- Bi-weekly paycheck planning with A/B templates
+- Income and expense management with categories
+- **Partial payment support** for expenses
+- **Undo functionality** for accidental moves or payments
+- **Sortable expense lists** (by due date or amount)
+- **Responsive mobile UI** with a hamburger menu
+- Debt payoff calculator (Avalanche & Snowball strategies)
+- Analytics dashboard for category breakdowns & monthly trends
+- Persistence: localStorage + optional JSON sync (desktop browsers)
+- CSV export for reports/backups
+- Installable PWA (works offline once loaded)
+- **Comprehensive onboarding tour** for new users
 
 ---
 
 ## Quick Start (Local Development)
 
 ```bash
-# install dependencies
+# 1. Clone the repository
+git clone https://github.com/pablomunmor/expense-tracker.git
+
+# 2. Navigate to the project directory
+cd expense-tracker
+
+# 3. Install dependencies
 npm install
 
-# start dev server (http://localhost:5173)
+# 4. Start the development server (http://localhost:5173)
 npm run dev
 
-# production build
+# 5. Production build
 npm run build
 
-# preview production build (http://localhost:4173)
+# 6. Preview production build (http://localhost:4173)
 npm run preview
-````
+```
 
 ---
 
 ## Project Structure
 
 ```
-public/                 # static assets (PWA icons, favicon, manifest)
+public/                 # Static assets (PWA icons, favicon, manifest)
 src/
-  App.jsx               # wrapper component
-  ExpenseForm.jsx       # add/edit expense form
-  ExpenseTrackingApp.jsx# main app (state, logic, UI)
-  main.jsx              # React entry, registers service worker
+  App.jsx               # Main wrapper component
+  ExpenseForm.jsx       # Add/edit expense form
+  ExpenseTrackingApp.jsx# Core application (state, logic, UI)
+  PaycheckCalculator.jsx# Standalone tool for estimating take-home pay
+  main.jsx              # React entry point, registers service worker
   index.css             # Tailwind base styles
-vite.config.js          # Vite + PWA config
-tailwind.config.js      # Tailwind config
+vite.config.js          # Vite + PWA configuration
+tailwind.config.js      # Tailwind CSS configuration
 ```
 
 ---
@@ -56,18 +67,16 @@ tailwind.config.js      # Tailwind config
 * **localStorage** → saves automatically per device/browser.
 * **JSON file sync**:
 
-  * On desktop Chrome/Edge: use **Connect JSON** to link a file inside iCloud Drive, Dropbox, Google Drive, or OneDrive. The app will auto-save changes there.
-  * On iOS/Safari: use **Import/Export JSON** manually via the Files app.
+  * On desktop Chrome/Edge: use **Connect Sync** to link a file inside a cloud-synced folder (like iCloud Drive, Dropbox, or Google Drive). The app will auto-save changes.
+  * On iOS/Safari/Other Browsers: use **Sync** → **Download Data** and **Upload Data** to manually transfer your financial plan.
 
-> Your financial data never leaves your device or cloud drive. It is not stored on GitHub or any server.
+> Your financial data never leaves your device or your chosen cloud drive. It is not stored on any third-party server.
 
 ---
 
 ## Deployment
 
-Every push to `main` triggers GitHub Actions to build and deploy the site to GitHub Pages:
-
-[https://pablomunmor.github.io/expense-tracker/](https://pablomunmor.github.io/expense-tracker/)
+The application is deployed to GitHub Pages.
 
 ---
 
@@ -81,7 +90,7 @@ Every push to `main` triggers GitHub Actions to build and deploy the site to Git
 ### Android (Chrome/Edge)
 
 1. Open the site.
-2. Tap **Install App** banner, or menu → **Add to Home Screen**.
+2. Tap the **Install App** banner, or go to menu → **Add to Home Screen**.
 
 ### Desktop (Chrome/Edge)
 
@@ -93,16 +102,20 @@ Every push to `main` triggers GitHub Actions to build and deploy the site to Git
 ## Key Dependencies
 
 * React 19 – UI framework
-* Vite 7 – dev server + bundler
+* Vite 7 – Dev server + bundler
 * vite-plugin-pwa – PWA service worker + manifest
-* Tailwind CSS 3 – styling
-* lucide-react – icons
+* Tailwind CSS 3 – Styling
+* lucide-react – Icons
+
+---
+
+## Created By
+
+This application was created by **Pablo Munoz**.
+[www.pablocmunoz.com](https://www.pablocmunoz.com)
 
 ---
 
 ## License
 
 MIT — feel free to fork and adapt.
-
-
----
