@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, DollarSign, CreditCard, TrendingUp, Settings, Plus, Minus, BarChart3, Target,
   ArrowUpDown, Check, Clock, AlertTriangle, ChevronDown, ChevronUp, Edit, Trash2, Save, X,
-  Download, Upload, Zap, Calculator, PieChart, LineChart, Menu, RotateCcw, ChevronLeft, ChevronRight,
+  Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw, ChevronLeft, ChevronRight,
   Sparkles, CheckCircle
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
@@ -172,7 +172,6 @@ const ExpenseTrackingApp = () => {
 
   // Mobile sync modal
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Celebration animation state
   const [celebration, setCelebration] = useState({ show: false, message: '' });
@@ -732,45 +731,21 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Handle expense modal save ----------
   const handleExpenseModalSave = (updatedExpense) => {
-    const originalExpense = expenseModal.expense;
-    let finalExpense = { ...updatedExpense, updatedAt: new Date().toISOString() };
-
-    // The modal's "amount" field represents the total amount.
-    // Compare it to the original total to see if it changed.
-    const originalTotalAmount = originalExpense.originalAmount || originalExpense.amount;
-
-    if (finalExpense.amount !== originalTotalAmount) {
-      // If the total amount was changed, we must reset this instance's partial
-      // payment history to prevent data inconsistency (e.g., paid > new total).
-      finalExpense.paidAmount = 0;
-      finalExpense.originalAmount = null; // The `amount` field is now the source of truth.
-      // If status was paid/cleared, it's now pending since the total is different.
-      if (finalExpense.status === 'paid' || finalExpense.status === 'cleared') {
-        finalExpense.status = 'pending';
-      }
-    } else {
-      // If the total amount is unchanged, we must restore the original partial
-      // payment data, because the modal editor flattened it for the UI.
-      finalExpense.amount = originalExpense.amount;
-      finalExpense.originalAmount = originalExpense.originalAmount;
-      finalExpense.paidAmount = originalExpense.paidAmount;
-    }
-
     setPeriods(prev => prev.map(period => {
       if (period.id !== expenseModal.periodId) return period;
 
-      if (finalExpense.isOneOff) {
+      if (updatedExpense.isOneOff) {
         return {
           ...period,
-          oneOffExpenses: (period.oneOffExpenses || []).map(exp =>
-            exp.id === finalExpense.id ? finalExpense : exp
+          oneOffExpenses: period.oneOffExpenses.map(exp =>
+            exp.id === updatedExpense.id ? { ...updatedExpense, updatedAt: new Date().toISOString() } : exp
           )
         };
       } else {
         return {
           ...period,
-          expenses: (period.expenses || []).map(exp =>
-            exp.id === finalExpense.id ? finalExpense : exp
+          expenses: period.expenses.map(exp =>
+            exp.id === updatedExpense.id ? updatedExpense : exp
           )
         };
       }
@@ -1235,23 +1210,13 @@ const ExpenseTrackingApp = () => {
 
   // Expense Edit Modal Component
   const ExpenseEditModal = () => {
-    const [editedExpense, setEditedExpense] = useState(null); // Initialized empty
+    const [editedExpense, setEditedExpense] = useState(expenseModal.expense);
     const [showScopeSelection, setShowScopeSelection] = useState(false);
     const [editScope, setEditScope] = useState('instance'); // 'instance' or 'template'
 
     const { expense } = expenseModal;
     useEffect(() => {
-      if (expense) {
-        // When the modal opens, we want the "Amount" field to represent the
-        // expense's total value, not the remaining amount after partial payments.
-        // We create a temporary, flattened object for editing.
-        setEditedExpense({
-          ...expense,
-          amount: expense.originalAmount || expense.amount,
-        });
-      } else {
-        setEditedExpense(null);
-      }
+      setEditedExpense(expense);
       setShowScopeSelection(false);
       setEditScope('instance');
     }, [expense]);
@@ -1410,9 +1375,6 @@ const ExpenseTrackingApp = () => {
         alert('Please enter a valid amount that does not exceed the remaining balance.');
         return;
       }
-
-      // Add to undo stack before making the change
-      setUndoStack(prev => [...prev.slice(-9), JSON.parse(JSON.stringify(periods))]);
 
       setPeriods(prevPeriods => {
         const newPeriods = structuredClone(prevPeriods);
@@ -1828,30 +1790,308 @@ const ExpenseTrackingApp = () => {
     );
   };
 
-  const renderSinglePeriod = () => {
-    const period = periods[selectedPeriod];
-    if (!period) return null;
+  const ExpenseItem = ({ expense, periodId }) => {
+    const getStatusColor = (status) => {
+      switch (status) {
+        case 'cleared': return 'bg-green-50 text-green-700 border-green-200';
+        case 'paid': return 'bg-blue-50 text-blue-700 border-blue-200';
+        default: return 'bg-gray-50 text-gray-600 border-gray-200';
+      }
+    };
+
+    const currentPeriodIndex = periods.findIndex(p => p.id === periodId);
+    const canMoveBack = currentPeriodIndex > 0 && expense.status === 'pending';
+    const canMoveForward = currentPeriodIndex < periods.length - 1 && expense.status === 'pending';
+
+    const setStatus = (newStatus) => {
+      if (expense.isOneOff) {
+        updateOneOff(periods, setPeriods, periodId, expense.id, { status: newStatus });
+      } else {
+        updateExpenseStatus(periodId, expense.id, newStatus);
+      }
+    };
+
     return (
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <button onClick={() => setSelectedPeriod(Math.max(0, selectedPeriod - 1))} disabled={selectedPeriod === 0} className="px-3 py-2 bg-gray-100 rounded disabled:opacity-50">Previous</button>
-          <span className="text-sm text-gray-600">Period {selectedPeriod + 1} of {periods.length}</span>
-          <button onClick={() => setSelectedPeriod(Math.min(periods.length - 1, selectedPeriod + 1))} disabled={selectedPeriod === periods.length - 1} className="px-3 py-2 bg-gray-100 rounded disabled:opacity-50">Next</button>
-        </div>
-        <PeriodHeader period={period} />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <h4 className="font-semibold mb-3">Expenses (Click to edit • Use arrows to move between paychecks)</h4>
-            <div className="space-y-3">
-              {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
-                <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
-              ))}
+      <div
+        onClick={() => setExpenseModal({ open: true, expense, periodId })}
+        className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-gray-300 transition-all duration-200 cursor-pointer group"
+      >
+        <div className="flex justify-between items-start mb-3">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-1">
+              <h3 className="font-semibold text-gray-900 text-lg">{expense.description}</h3>
+              {expense.isOneOff && (
+                <span className="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
+                  One-off
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-4 text-sm text-gray-500">
+              <span className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-navy rounded-full"></div>
+                {expense.category}
+              </span>
+              {expense.dueDate && (
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  Due {expense.dueDate}th
+                </span>
+              )}
             </div>
           </div>
-          <div className="space-y-4">
-            <DebtSummary />
-            <Analytics />
+
+          <div className="text-right">
+            <div className="text-xl font-bold text-navy">{formatCurrency(expense.originalAmount || expense.amount)}</div>
+            {expense.originalAmount && (
+              <div className="text-xs text-gray-500">
+                  of {formatCurrency(expense.originalAmount)}
+              </div>
+            )}
+            <div className={`mt-1 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(expense.status)}`}>
+              {expense.status === 'cleared' && <CheckCircle className="w-3 h-3 mr-1" />}
+              {expense.status === 'paid' && <Check className="w-3 h-3 mr-1" />}
+              <span className="capitalize">{expense.status || 'pending'}</span>
+            </div>
           </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-3 border-t border-gray-100" onClick={e => e.stopPropagation()}>
+          <div className="flex gap-2">
+            {canMoveBack && (
+              <button onClick={() => moveExpense(expense, periodId, 'backward')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-navy bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+                <ChevronLeft className="w-3 h-3" />
+              </button>
+            )}
+            {canMoveForward && (
+              <button onClick={() => moveExpense(expense, periodId, 'forward')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-navy bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPartialPaymentModal({ open: true, expense, periodId })}
+              disabled={expense.status === 'cleared' || expense.status === 'paid'}
+              className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Pay
+            </button>
+            <button
+              onClick={() => setStatus('cleared')}
+              className="px-3 py-1.5 text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const PeriodHeader = ({ period }) => {
+    const totals = calculatePeriodTotals(period);
+
+    return (
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div className={`flex items-center justify-center w-12 h-12 rounded-xl font-bold text-lg ${
+              period.type === 'A'
+                ? 'bg-navy text-white'
+                : 'bg-blue-100 text-navy'
+            }`}>
+              {period.type}
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-navy">Paycheck {period.type}</h2>
+              <p className="text-sm text-gray-500">{formatDate(period.startDate)} — {formatDate(period.endDate)}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setOneOffModal({ open: true, periodId: period.id, editingId: null, fields: { description: '', amount: 0, category: 'Other', status: 'pending', notes: '' } })}
+            className="px-4 py-2 text-sm font-medium text-navy bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Add One-Off
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(totals.totalIncome)}</div>
+            <div className="text-sm text-gray-500 font-medium">Total Income</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-gray-900">{formatCurrency(totals.totalExpenses)}</div>
+            <div className="text-sm text-gray-500 font-medium">Total Expenses</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">{formatCurrency(totals.totalPaid)}</div>
+            <div className="text-sm text-gray-500 font-medium">Paid</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${totals.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {formatCurrency(totals.difference)}
+            </div>
+            <div className="text-sm text-gray-500 font-medium">Net Income</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ViewControls = () => (
+    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-8">
+      <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+        <div className="bg-blue-50 rounded-xl px-6 py-4">
+          <div className="text-center">
+            <div className="text-sm font-medium text-blue-600 mb-1">Today</div>
+            <div className="text-lg font-bold text-navy">
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 p-1 bg-gray-100 rounded-xl">
+          {[
+            { key: 'single', label: 'Single Period' },
+            { key: 'side-by-side', label: 'Side-by-Side' },
+            { key: 'dashboard', label: 'Dashboard' }
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setCurrentView(key)}
+              className={`px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200 ${
+                currentView === key
+                  ? 'bg-navy text-white shadow-sm'
+                  : 'text-gray-600 hover:text-navy hover:bg-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {undoStack.length > 0 && (
+          <button
+            onClick={handleUndo}
+            className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-xl transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Undo
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const DebtSummary = () => {
+    const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
+    const totalDebt = debtExpenses.reduce((sum, exp) => sum + exp.balance, 0);
+    const monthlyPayments = debtExpenses.reduce((sum, exp) => sum + exp.minimumPayment, 0);
+
+    return (
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <h3 className="text-lg font-bold text-navy mb-4 flex items-center gap-2">
+          <CreditCard className="w-5 h-5" />
+          Debt Summary
+        </h3>
+        <div className="space-y-4">
+          <div className="flex justify-between items-center py-3 border-b border-gray-100">
+            <span className="text-sm font-medium text-gray-600">Total Debt</span>
+            <span className="text-lg font-bold text-red-600">{formatCurrency(totalDebt)}</span>
+          </div>
+          <div className="flex justify-between items-center py-3 border-b border-gray-100">
+            <span className="text-sm font-medium text-gray-600">Monthly Payments</span>
+            <span className="text-lg font-bold text-navy">{formatCurrency(monthlyPayments)}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowDebtTools(true)}
+          className="w-full mt-4 px-4 py-3 bg-navy text-white rounded-xl font-medium hover:bg-navyDark transition-colors"
+        >
+          Payoff Calculator
+        </button>
+      </div>
+    );
+  };
+
+  const Analytics = () => {
+    const { categoryTotals } = getAnalyticsData();
+    return (
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <h3 className="text-lg font-bold text-navy mb-4 flex items-center gap-2">
+          <BarChart3 className="w-5 h-5" />
+          Quick Analytics
+        </h3>
+        <div className="space-y-3">
+          {Object.entries(categoryTotals).slice(0, 4).map(([category, amount]) => (
+            <div key={category} className="flex justify-between items-center py-2">
+              <span className="text-sm font-medium text-gray-600">{category}</span>
+              <span className="text-sm font-bold text-navy">{formatCurrency(amount)}</span>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowAnalytics(true)}
+          className="w-full mt-4 px-4 py-3 bg-blue-50 text-navy rounded-xl font-medium hover:bg-blue-100 transition-colors"
+        >
+          Full Analytics
+        </button>
+      </div>
+    );
+  };
+
+  const renderDashboard = () => {
+    const periodsToShow = periods.slice(0, 12);
+    const totalsNext3Months = periods.slice(0, 6).reduce((sum, p) => sum + calculatePeriodTotals(p).difference, 0);
+    const unpaidThisMonth = periods.slice(0, 2).reduce((sum, p) => sum + calculatePeriodTotals(p).unpaidAmount, 0);
+
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <DebtSummary />
+          <Analytics />
+          <div className="bg-green-50 border border-green-200 rounded-2xl p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-green-700 mb-2 flex items-center gap-2"><TrendingUp className="w-5 h-5" /> Next 3 Months</h3>
+            <div className="text-3xl font-bold text-green-600">{formatCurrency(totalsNext3Months)}</div>
+            <div className="text-sm text-gray-500 font-medium mt-1">Net Income</div>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-red-700 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> Unpaid This Month</h3>
+            <div className="text-3xl font-bold text-red-600">{formatCurrency(unpaidThisMonth)}</div>
+            <div className="text-sm text-gray-500 font-medium mt-1">Needs Attention</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {periodsToShow.map(period => {
+            const totals = calculatePeriodTotals(period);
+            return (
+              <div
+                key={period.id}
+                className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer"
+                onClick={() => { setSelectedPeriod(period.id); setCurrentView('single'); }}
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${period.type === 'A' ? 'bg-navy text-white' : 'bg-blue-100 text-navy'}`}>{period.type}</span>
+                  <div className={`text-xl font-bold ${totals.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(totals.difference)}</div>
+                </div>
+                <div className="text-sm text-gray-500 mb-2">{formatDate(period.startDate)}</div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span>Income:</span><span className="font-medium text-green-600">{formatCurrency(totals.totalIncome)}</span></div>
+                  <div className="flex justify-between"><span>Expenses:</span><span className="font-medium text-navy">{formatCurrency(totals.totalExpenses)}</span></div>
+                  <div className="flex justify-between"><span>Unpaid:</span><span className={`font-medium ${totals.unpaidAmount > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(totals.unpaidAmount)}</span></div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1862,10 +2102,8 @@ const ExpenseTrackingApp = () => {
 
     return (
       <div className="space-y-4">
-        {/* Responsive header */}
-        <div className="sticky top-2 z-10 bg-gray-50/80 backdrop-blur rounded-md p-2" >
+        <div className="sticky top-2 z-10 bg-gray-50/80 backdrop-blur rounded-md p-2">
           <div className="grid grid-cols-2 sm:grid-cols-3 items-center gap-2">
-            {/* Left button */}
             <div className="order-2 sm:order-1">
               <button
                 onClick={() => setSelectedPeriod(Math.max(0, selectedPeriod - SIDE_BY_SIDE_COUNT))}
@@ -1875,15 +2113,11 @@ const ExpenseTrackingApp = () => {
                 Previous {SIDE_BY_SIDE_COUNT}
               </button>
             </div>
-
-            {/* Center label */}
             <div className="col-span-2 sm:col-span-1 order-1 sm:order-2 text-center">
               <span className="text-sm sm:text-base text-gray-700 font-medium">
                 Periods {selectedPeriod + 1}–{Math.min(selectedPeriod + SIDE_BY_SIDE_COUNT, periods.length)}
               </span>
             </div>
-
-            {/* Right button */}
             <div className="order-3 text-right">
               <button
                 onClick={() =>
@@ -1898,324 +2132,218 @@ const ExpenseTrackingApp = () => {
               </button>
             </div>
           </div>
-        </div >
+        </div>
 
-        {/* 4 cycles side by side responsive style. Adjust # of columns at the very top */}
         <div className="overflow-x-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {periodsToShow.map(period => (
               <div key={period.id} className="space-y-4">
                 <PeriodHeader period={period} />
-                <div className="space-y-3">
-                  <h4 className="font-semibold text-sm">Expenses</h4>
-                  {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
-                    <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
+                <div className="space-y-4">
+                  <h3 className="text-xl font-bold text-navy">Expenses</h3>
+                  {[...(period.expenses || []), ...(period.oneOffExpenses || [])]
+                    .sort((a, b) => a.dueDate - b.dueDate)
+                    .map(expense => (
+                      <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
                   ))}
                 </div>
               </div>
             ))}
           </div>
         </div>
-
-        {/* Keep your summary widgets */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DebtSummary />
-          <Analytics />
-        </div>
       </div>
     );
   };
 
-  const renderDashboard = () => {
-    const periodsToShow = periods.slice(0, 12);
+  const renderSinglePeriod = () => {
+    const period = periods[selectedPeriod];
+    if (!period) return null;
+
     return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <DebtSummary />
-          <Analytics />
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2"><TrendingUp className="w-5 h-5" /> Next 3 Months</h3>
-            <div className="text-2xl font-bold text-green-700">
-              {formatCurrency(periodsToShow.slice(0, 6).reduce((sum, p) => sum + calculatePeriodTotals(p).difference, 0))}
-            </div>
-            <div className="text-sm text-green-600">Net Income</div>
-          </div>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <h3 className="font-semibold text-red-800 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> Unpaid This Month</h3>
-            <div className="text-2xl font-bold text-red-700">
-              {formatCurrency(periodsToShow.slice(0, 2).reduce((sum, p) => sum + calculatePeriodTotals(p).unpaidAmount, 0))}
-            </div>
-            <div className="text-sm text-red-600">Needs Attention</div>
-          </div>
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setSelectedPeriod(Math.max(0, selectedPeriod - 1))}
+            disabled={selectedPeriod === 0}
+            className="flex items-center gap-2 px-6 py-3 text-sm font-medium bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Previous
+          </button>
+          <span className="text-sm font-medium text-gray-600">
+            Period {selectedPeriod + 1} of {periods.length}
+          </span>
+          <button
+            onClick={() => setSelectedPeriod(Math.min(periods.length - 1, selectedPeriod + 1))}
+            disabled={selectedPeriod === periods.length - 1}
+            className="flex items-center gap-2 px-6 py-3 text-sm font-medium bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Next
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {periodsToShow.map(period => {
-            const totals = calculatePeriodTotals(period);
-            return (
-              <div
-                key={period.id}
-                className="bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer"
-                onClick={() => { setSelectedPeriod(period.id); setCurrentView('single'); }}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <span className={`px-2 py-1 rounded text-xs ${period.type === 'A' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{period.type}</span>
-                  <div className={`text-lg font-bold ${totals.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(totals.difference)}</div>
-                </div>
-                <div className="text-sm text-gray-600 mb-2">{formatDate(period.startDate)}</div>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between"><span>Income:</span><span className="text-green-600">{formatCurrency(totals.totalIncome)}</span></div>
-                  <div className="flex justify-between"><span>Expenses:</span><span>{formatCurrency(totals.totalExpenses)}</span></div>
-                  <div className="flex justify-between"><span>Unpaid:</span><span className={totals.unpaidAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(totals.unpaidAmount)}</span></div>
-                </div>
-              </div>
-            );
-          })}
+        <PeriodHeader period={period} />
+
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+          <div className="xl:col-span-3 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-navy">Expenses</h3>
+              <span className="text-sm text-gray-500">Click to edit • Use arrows to move between paychecks</span>
+            </div>
+
+            <div className="space-y-4">
+              {[...(period.expenses || []), ...(period.oneOffExpenses || [])]
+                .sort((a, b) => a.dueDate - b.dueDate)
+                .map(expense => (
+                  <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <DebtSummary />
+            <Analytics />
+          </div>
         </div>
       </div>
     );
   };
 
-  // ---------- Render ----------
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Celebration Toast */}
-      <CelebrationToast />
-
+    <div className="min-h-screen" style={{ backgroundColor: '#f8fafc' }}>
       {/* Header */}
-      <header className="bg-white border-b shadow-sm sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex justify-between items-center py-3">
-            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <DollarSign className="w-7 h-7 text-blue-600" />
-              <span>Expense Planner</span>
-            </h1>
-            <div className="hidden md:flex items-center gap-4">
-              <nav className="flex items-center gap-2">
-                <button onClick={() => setShowIncomeSettings(true)} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" /> Income
-                </button>
-                <button onClick={() => setShowSourceManagement(true)} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
-                  <Edit className="w-4 h-4" /> Expenses
-                </button>
-                <button onClick={() => setShowAnalytics(!showAnalytics)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-100 text-purple-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <BarChart3 className="w-4 h-4" /> Analytics
-                </button>
-                <button onClick={() => setShowDebtTools(!showDebtTools)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <Target className="w-4 h-4" /> Debt Tools
-                </button>
-                <button onClick={() => setShowPaycheckCalculator(true)} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showPaycheckCalculator ? 'bg-green-100 text-green-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <Calculator className="w-4 h-4" /> Calculator
-                </button>
-              </nav>
-              <div className="flex items-center gap-2 border-l pl-4">
-                {fsSupported ? (
-                  <>
-                    {!syncHandle ? (
-                      <>
-                        <button onClick={connectSyncFile} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700" title="Pick a JSON in a cloud-synced folder to auto-save into">
-                          <Upload className="w-4 h-4" /> Connect Sync
-                        </button>
-                        <button onClick={loadFromSyncFile} className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200" title="Load existing JSON and enable autosave">
-                          Load
-                        </button>
-                      </>
-                    ) : (
-                       <div className="text-xs text-gray-600 flex items-center gap-3">
-                         <span>Autosaving...</span>
-                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
-                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-                       </div>
-                    )}
-                  </>
-                ) : (
-                  <button onClick={() => setShowSyncModal(true)} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700">
-                    <Upload className="w-4 h-4" /> Sync
-                  </button>
-                )}
-                 <button
-                  onClick={() => {
-                    if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="p-2 text-gray-500 hover:bg-red-100 hover:text-red-600 rounded-full"
-                  title="Reset All Data"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-12 h-12 bg-navy rounded-2xl">
+                <DollarSign className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-navy">Expense Planner</h1>
+                <p className="text-sm text-gray-500">Bi-weekly paycheck planning</p>
               </div>
             </div>
-            {/* Mobile Menu Button */}
-            <div className="md:hidden">
-              <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 rounded-md text-gray-700 hover:bg-gray-100">
-                <Menu className="w-6 h-6" />
+
+            {/* Desktop Navigation */}
+            <nav className="hidden lg:flex items-center gap-2">
+              {[
+                { icon: DollarSign, label: 'Income', onClick: () => setShowIncomeSettings(true) },
+                { icon: Edit, label: 'Expenses', onClick: () => setShowSourceManagement(true) },
+                { icon: BarChart3, label: 'Analytics', onClick: () => setShowAnalytics(true) },
+                { icon: Target, label: 'Debt Tools', onClick: () => setShowDebtTools(true) },
+                { icon: Calculator, label: 'Calculator', onClick: () => setShowPaycheckCalculator(true) }
+              ].map(({ icon: Icon, label, onClick }) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-gray-600 hover:text-navy hover:bg-gray-50 rounded-xl transition-colors"
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
+            </nav>
+
+            <div className="hidden lg:flex items-center gap-2 border-l ml-6 pl-6">
+              {fsSupported ? (
+                <>
+                  {!syncHandle ? (
+                    <>
+                      <button onClick={connectSyncFile} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700" title="Pick a JSON in a cloud-synced folder to auto-save into">
+                        <Upload className="w-4 h-4" /> Connect Sync
+                      </button>
+                      <button onClick={loadFromSyncFile} className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200" title="Load existing JSON and enable autosave">
+                        Load
+                      </button>
+                    </>
+                  ) : (
+                      <div className="text-xs text-gray-600 flex items-center gap-3">
+                        <span>Autosaving...</span>
+                        {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
+                        {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+                      </div>
+                  )}
+                </>
+              ) : (
+                <button onClick={() => setShowSyncModal(true)} className="px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center gap-2 hover:bg-indigo-700">
+                  <Upload className="w-4 h-4" /> Sync
+                </button>
+              )}
+                <button
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
+                    localStorage.clear();
+                    window.location.reload();
+                  }
+                }}
+                className="p-2 text-gray-500 hover:bg-red-100 hover:text-red-600 rounded-full"
+                title="Reset All Data"
+              >
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Mobile Menu Button */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="lg:hidden flex items-center justify-center w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors"
+            >
+              <Menu className="w-5 h-5 text-navy" />
+            </button>
           </div>
 
-          {/* Mobile Menu Dropdown */}
+          {/* Mobile Menu */}
           {isMobileMenuOpen && (
-            <div className="md:hidden pt-2 pb-4 border-t">
-              <nav className="flex flex-col gap-2 mb-4">
-                <button onClick={() => { setShowIncomeSettings(true); setIsMobileMenuOpen(false); }} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" /> Income
-                </button>
-                <button onClick={() => { setShowSourceManagement(true); setIsMobileMenuOpen(false); }} className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md flex items-center gap-2">
-                  <Edit className="w-4 h-4" /> Expenses
-                </button>
-                <button onClick={() => { setShowAnalytics(!showAnalytics); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showAnalytics ? 'bg-purple-100 text-purple-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <BarChart3 className="w-4 h-4" /> Analytics
-                </button>
-                <button onClick={() => { setShowDebtTools(!showDebtTools); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showDebtTools ? 'bg-orange-100 text-orange-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <Target className="w-4 h-4" /> Debt Tools
-                </button>
-                <button onClick={() => { setShowPaycheckCalculator(true); setIsMobileMenuOpen(false); }} className={`px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${showPaycheckCalculator ? 'bg-green-100 text-green-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                  <Calculator className="w-4 h-4" /> Calculator
-                </button>
-              </nav>
-              <div className="flex flex-col items-center gap-2 border-t pt-4">
-                {fsSupported ? (
-                  <>
-                    {!syncHandle ? (
-                      <>
-                        <button onClick={connectSyncFile} className="w-full px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center justify-center gap-2 hover:bg-indigo-700" title="Pick a JSON in a cloud-synced folder to auto-save into">
-                          <Upload className="w-4 h-4" /> Connect Sync
-                        </button>
-                        <button onClick={loadFromSyncFile} className="w-full px-3 py-2 bg-indigo-100 text-indigo-800 rounded text-sm hover:bg-indigo-200" title="Load existing JSON and enable autosave">
-                          Load
-                        </button>
-                      </>
-                    ) : (
-                       <div className="text-xs text-gray-600 flex items-center gap-3">
-                         <span>Autosaving...</span>
-                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
-                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-                       </div>
-                    )}
-                  </>
-                ) : (
-                  <button onClick={() => setShowSyncModal(true)} className="w-full px-3 py-2 bg-indigo-600 text-white rounded text-sm flex items-center justify-center gap-2 hover:bg-indigo-700">
-                    <Upload className="w-4 h-4" /> Sync
+            <div className="lg:hidden pb-6 border-t border-gray-100">
+              <nav className="grid grid-cols-2 gap-2 pt-6">
+                {[
+                  { icon: DollarSign, label: 'Income', onClick: () => setShowIncomeSettings(true) },
+                  { icon: Edit, label: 'Expenses', onClick: () => setShowSourceManagement(true) },
+                  { icon: BarChart3, label: 'Analytics', onClick: () => setShowAnalytics(true) },
+                  { icon: Target, label: 'Debt Tools', onClick: () => setShowDebtTools(true) },
+                  { icon: Calculator, label: 'Calculator', onClick: () => setShowPaycheckCalculator(true) },
+                  { icon: Upload, label: 'Sync', onClick: () => { setShowSyncModal(true); setIsMobileMenuOpen(false); } }
+                ].map(({ icon: Icon, label, onClick }) => (
+                  <button
+                    key={label}
+                    onClick={() => { onClick(); setIsMobileMenuOpen(false); }}
+                    className="flex flex-col items-center gap-2 p-4 text-sm font-medium text-gray-600 hover:text-navy hover:bg-gray-50 rounded-xl transition-colors"
+                  >
+                    <Icon className="w-5 h-5" />
+                    {label}
                   </button>
-                )}
-                 <button
-                  onClick={() => {
-                    if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="w-full p-2 text-gray-500 hover:bg-red-100 hover:text-red-600 rounded-md flex items-center justify-center gap-2"
-                  title="Reset All Data"
-                >
-                  <Trash2 className="w-4 h-4" /> Reset All Data
-                </button>
-              </div>
+                ))}
+              </nav>
             </div>
           )}
-           {/* Autosave status line - moved inside for better layout control */}
-            {syncHandle && (
-              <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
-                <span>Autosaving to connected file…</span>
-                {lastSavedAt && <span className="text-green-700">Last saved: {formatDate(lastSavedAt)}</span>}
-                {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-              </div>
-            )}
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* Overlay Modals */}
-        {showSourceManagement && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"><SourceExpenseManagement /></div>
-          </div>
-        )}
-
-        {showIncomeSettings && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto"><IncomeSettings /></div>
-          </div>
-        )}
-
-        {showDebtTools && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto"><DebtPayoffTools /></div>
-          </div>
-        )}
-
-        {showAnalytics && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"><AdvancedAnalytics /></div>
-          </div>
-        )}
-
-        {showPaycheckCalculator && (
-          <PaycheckCalculator onClose={() => setShowPaycheckCalculator(false)} />
-        )}
-
-        {oneOffModal.open && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
-            onClick={() => setOneOffModal({ open: false, periodId: null, editingId: null, fields: null })}>
-            <div className="bg-white rounded-lg p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-              <h3 className="text-base font-semibold mb-3">
-                {oneOffModal.editingId ? 'Edit One-Off' : 'Add One-Off'}
-              </h3>
-
-              <div className="space-y-3">
-                <input
-                  placeholder="Description"
-                  className="w-full border rounded px-2 py-1"
-                  value={oneOffModal.fields?.description || ''}
-                  onChange={e => setOneOffModal(m => ({ ...m, fields: { ...m.fields, description: e.target.value } }))}
-                />
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="Amount"
-                  className="w-full border rounded px-2 py-1"
-                  value={oneOffModal.fields?.amount || ''}
-                  onChange={e => setOneOffModal(m => ({ ...m, fields: { ...m.fields, amount: parseFloat(e.target.value || 0) } }))}
-                />
-              </div>
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button className="px-3 py-2 text-sm bg-gray-100 rounded"
-                  onClick={() => setOneOffModal({ open: false, periodId: null, editingId: null, fields: null })}>
-                  Cancel
-                </button>
-                <button
-                  className="px-3 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-50"
-                  disabled={!oneOffModal.fields?.description || !oneOffModal.fields?.amount}
-                  onClick={() => {
-                    addOneOff(periods, setPeriods, oneOffModal.periodId, oneOffModal.fields);
-                    setOneOffModal({ open: false, periodId: null, editingId: null, fields: null });
-                    triggerCelebration('One-off expense added! 📋');
-                  }}>
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showOnboarding && <OnboardingModal onClose={closeOnboarding} />}
-
-        <ExpenseEditModal />
-        <PartialPaymentModal />
-        <SyncModal />
-
+      <main className="max-w-7xl mx-auto px-4 lg:px-8 py-8">
         <ViewControls />
-
         {currentView === 'single' && renderSinglePeriod()}
         {currentView === 'side-by-side' && renderSideBySide()}
         {currentView === 'dashboard' && renderDashboard()}
-      </div>
-      <footer className="text-center py-4 text-gray-500 text-sm">
-        Created with &lt;3 <a href="https://www.pablocmunoz.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700">Pablo Munoz</a>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-200 bg-white">
+        <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6">
+          <p className="text-center text-sm text-gray-500">
+            Created with care by{' '}
+            <a
+              href="https://www.pablocmunoz.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-navy hover:text-navyLight transition-colors"
+            >
+              Pablo Munoz
+            </a>
+          </p>
+        </div>
       </footer>
     </div>
   );
