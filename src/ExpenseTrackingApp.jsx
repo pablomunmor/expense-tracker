@@ -3,7 +3,7 @@ import {
   Calendar, DollarSign, CreditCard, TrendingUp, Settings, Plus, Minus, BarChart3, Target,
   ArrowUpDown, Check, Clock, AlertTriangle, ChevronDown, ChevronUp, Edit, Trash2, Save, X,
   Download, Upload, Zap, Calculator, PieChart, LineChart, RotateCcw, ChevronLeft, ChevronRight,
-  Sparkles, CheckCircle, Menu
+  Sparkles, CheckCircle, Menu, LayoutGrid
 } from 'lucide-react';
 import ExpenseForm from './ExpenseForm';
 import PaycheckCalculator from './PaycheckCalculator';
@@ -1702,24 +1702,53 @@ const ExpenseTrackingApp = () => {
     const [step, setStep] = useState(0);
     const steps = [
       {
-        title: 'Plan by Paycheck',
-        icon: DollarSign,
-        body: 'Your expenses are organized into A/B paychecks every two weeks. Net shows income minus expenses for that paycheck.'
+        title: "Welcome to Your Financial Co-Pilot",
+        icon: Sparkles,
+        body: "This isn't just an expense tracker; it's a powerful tool to help you plan your financial future, one paycheck at a time. Let's take a quick tour of the key features."
       },
       {
-        title: 'Move Single Instances',
-        icon: ChevronRight,
-        body: 'Use arrow buttons on a card to move just that instance to next/previous paycheck. Template remains unchanged.'
+        title: "Master Your Views",
+        icon: LayoutGrid,
+        body: "You have two powerful ways to see your finances:",
+        tips: [
+          "Single Period View: Focus on one paycheck at a time. This is where you can sort your expenses by due date or amount using the dropdown.",
+          "Side-by-Side View: See multiple paychecks at once to plan further ahead. The sort order you set in the Single Period view applies here too.",
+          "Dashboard View: Get a high-level overview of your financial health."
+        ]
       },
       {
-        title: 'Instant Actions + Undo',
-        icon: RotateCcw,
-        body: 'No confirmation dialogs. Mark as Paid/Cleared instantly; use Undo if needed.'
+        title: "Handle Payments with Ease",
+        icon: CreditCard,
+        body: "Paying your bills is flexible. You can mark an expense as cleared, or if you're paying in installments, you can make a partial payment.",
+        tips: [
+          "Click an expense to open the edit modal.",
+          "Use the 'Pay' button on an expense card to make a partial payment.",
+          "Made a mistake? Use the 'Undo' button in the header to reverse your last move or payment."
+        ]
       },
       {
-        title: 'One-Offs & Sync',
+        title: "Conquer Your Debt",
+        icon: Target,
+        body: "The Debt Tracker helps you create a strategy to pay down your debts. See how different strategies (like Avalanche or Snowball) can impact your payoff timeline.",
+        tips: [
+          "Add your debts in the 'Expenses' management screen.",
+          "Open the 'Debt Tools' to use the payoff calculator.",
+          "Add an extra payment amount to see how quickly you can become debt-free."
+        ]
+      },
+      {
+        title: "Sync Across Devices",
         icon: Upload,
-        body: 'Add one-offs per paycheck. Optionally connect a sync file for automatic saves.'
+        body: "Keep your financial plan in sync, whether you're on your desktop or on the go.",
+        tips: [
+          "On Desktop: Use the 'Connect Sync' button to link a file from a cloud service like iCloud or Google Drive for automatic saving.",
+          "On Mobile: Use the 'Sync' button to manually download your data file and upload it to another device."
+        ]
+      },
+      {
+        title: "You're All Set!",
+        icon: CheckCircle,
+        body: "You're ready to take control of your finances. Start by setting up your income and expenses, and happy planning!"
       }
     ];
     const StepIcon = steps[step].icon;
@@ -1753,32 +1782,13 @@ const ExpenseTrackingApp = () => {
           <p className="text-sm text-gray-700 mb-4">{steps[step].body}</p>
 
           {/* Tips */}
-          <ul className="space-y-2 text-sm text-gray-600 mb-4">
-            {step === 0 && (
-              <>
-                <li>• A/B chip shows which paycheck you’re on.</li>
-                <li>• Net Income updates as you add/move items.</li>
-              </>
-            )}
-            {step === 1 && (
-              <>
-                <li>• Moves persist across refreshes.</li>
-                <li>• Template stays intact; only this instance changes.</li>
-              </>
-            )}
-            {step === 2 && (
-              <>
-                <li>• Actions are instant; use the Undo button in the header.</li>
-                <li>• Look for the green toast confirming the change.</li>
-              </>
-            )}
-            {step === 3 && (
-              <>
-                <li>• Add one-offs from each period’s header.</li>
-                <li>• Connect a sync file (when supported) for auto-save.</li>
-              </>
-            )}
-          </ul>
+          {steps[step].tips && (
+            <ul className="space-y-2 text-sm text-gray-600 mb-4 list-disc list-inside">
+              {steps[step].tips.map((tip, index) => (
+                <li key={index}>{tip}</li>
+              ))}
+            </ul>
+          )}
 
           {/* Footer */}
           <div className="flex items-center justify-between">
@@ -1914,6 +1924,15 @@ const ExpenseTrackingApp = () => {
               </button>
             </div>
           </div>
+          <div className="mt-2 pt-2 border-t border-gray-200 flex justify-center items-center gap-2">
+            <label htmlFor="sbs-sort" className="text-sm font-medium">Sort by:</label>
+            <select id="sbs-sort" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="text-sm border rounded px-2 py-1 bg-white">
+              <option value="default">Default Order</option>
+              <option value="dueDate">Due Date</option>
+              <option value="amountDesc">Amount (High-Low)</option>
+              <option value="amountAsc">Amount (Low-High)</option>
+            </select>
+          </div>
         </div >
 
         {/* 4 cycles side by side responsive style. Adjust # of columns at the very top */}
@@ -1923,10 +1942,7 @@ const ExpenseTrackingApp = () => {
               <div key={period.id} className="space-y-4">
                 <PeriodHeader period={period} />
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h4 className="font-semibold text-sm">Expenses</h4>
-                    {/* The sort dropdown can be added here if desired for this view too */}
-                  </div>
+                  <h4 className="font-semibold text-sm mb-2">Expenses</h4>
                   {[...(period.expenses || []), ...(period.oneOffExpenses || [])]
                     .sort((a, b) => {
                       if (sortOrder === 'dueDate') return (a.dueDate || 99) - (b.dueDate || 99);
