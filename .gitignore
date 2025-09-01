@@ -67,3 +67,8 @@ dev-dist/
 expense-planner.json
 dev-dist/
 
+
+# Python
+.venv/
+__pycache__/
+*.pyc
