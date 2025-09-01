@@ -5,6 +5,7 @@ import {
   Download, Upload, Zap, Calculator, PieChart, LineChart, Menu, RotateCcw, ChevronLeft, ChevronRight,
   Sparkles, CheckCircle
 } from 'lucide-react';
+import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import ExpenseForm from './ExpenseForm';
 import PaycheckCalculator from './PaycheckCalculator';
 
@@ -1151,7 +1152,14 @@ const ExpenseTrackingApp = () => {
 
   const AdvancedAnalytics = () => {
     const { categoryTotals, monthlyTrends } = getAnalyticsData();
-    const totalCategoryAmount = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+    const categoryChartData = Object.entries(categoryTotals).map(([name, value]) => ({ name, value }));
+    const COLORS = Object.keys(categoryTotals).map((_, index) => `hsl(${index * 45}, 70%, 60%)`);
+    const trendsChartData = Object.entries(monthlyTrends).map(([name, data]) => ({
+      name,
+      Income: data.income,
+      Expenses: data.expenses,
+      Net: data.difference,
+    }));
     return (
       <div className="bg-white border rounded-lg p-6">
         <div className="flex justify-between items-center mb-6">
@@ -1167,42 +1175,52 @@ const ExpenseTrackingApp = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h4 className="font-semibold mb-3 flex items-center gap-2"><PieChart className="w-4 h-4" /> Category Distribution (Next 6 Months)</h4>
-            <div className="space-y-2">
-              {Object.entries(categoryTotals).map(([category, amount]) => {
-                const percentage = totalCategoryAmount ? (amount / totalCategoryAmount) * 100 : 0;
-                return (
-                  <div key={category} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 rounded" style={{ backgroundColor: `hsl(${Object.keys(categoryTotals).indexOf(category) * 45}, 70%, 60%)` }}></div>
-                      <span className="text-sm">{category}</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-semibold text-sm">{formatCurrency(amount)}</div>
-                      <div className="text-xs text-gray-600">{percentage.toFixed(1)}%</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <RechartsPieChart>
+                <Pie
+                  data={categoryChartData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                  nameKey="name"
+                  label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+                    const RADIAN = Math.PI / 180;
+                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                    return (
+                      <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
+                        {`${(percent * 100).toFixed(0)}%`}
+                      </text>
+                    );
+                  }}
+                >
+                  {categoryChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value) => formatCurrency(value)} />
+                <Legend />
+              </RechartsPieChart>
+            </ResponsiveContainer>
           </div>
 
           <div>
             <h4 className="font-semibold mb-3 flex items-center gap-2"><LineChart className="w-4 h-4" /> Monthly Cash Flow Trends</h4>
-            <div className="space-y-3">
-              {Object.entries(monthlyTrends).map(([month, data]) => (
-                <div key={month} className="bg-gray-50 p-3 rounded">
-                  <div className="font-medium text-sm mb-2">{month}</div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div><div className="text-green-600">Income</div><div className="font-semibold">{formatCurrency(data.income)}</div></div>
-                    <div><div className="text-red-600">Expenses</div><div className="font-semibold">{formatCurrency(data.expenses)}</div></div>
-                    <div>
-                      <div className={`${data.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>Net</div>
-                      <div className={`font-semibold ${data.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(data.difference)}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={trendsChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis tickFormatter={(value) => formatCurrency(value).slice(1)} />
+                <Tooltip formatter={(value) => formatCurrency(value)} />
+                <Legend />
+                <Bar dataKey="Income" fill="#82ca9d" />
+                <Bar dataKey="Expenses" fill="#8884d8" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
