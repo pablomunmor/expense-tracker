@@ -155,6 +155,7 @@ const ExpenseTrackingApp = () => {
   const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
+  const [expenseSort, setExpenseSort] = useState({ key: 'default', direction: 'asc' });
 
   // --- Onboarding (first-time only) ---
   const [showOnboarding, setShowOnboarding] = useState(() =>
@@ -583,6 +584,51 @@ const ExpenseTrackingApp = () => {
     return { totalDebt, monthlyPayments, payoffMonths: month, totalInterest, sortedDebts };
   };
 
+  // ---------- Expense Sorting ----------
+  const getSortableValue = (expense, period, key) => {
+    if (key === 'date') {
+      if (expense.isOneOff) {
+        return toDate(expense.createdAt)?.getTime() || 0;
+      }
+      if (period && expense.dueDate) {
+        const periodStart = toDate(period.startDate);
+        const expenseDay = expense.dueDate;
+        let dueMonth = periodStart.getMonth();
+        let dueYear = periodStart.getFullYear();
+        if (expenseDay < periodStart.getDate()) {
+          dueMonth += 1;
+          if (dueMonth > 11) {
+            dueMonth = 0;
+            dueYear += 1;
+          }
+        }
+        return new Date(dueYear, dueMonth, expenseDay).getTime();
+      }
+      return 0;
+    }
+    return expense.position ?? 0;
+  };
+
+  const sortExpenses = (expenses, period, sortConfig) => {
+    const { key, direction } = sortConfig;
+    if (key === 'default') {
+      return expenses;
+    }
+
+    return [...expenses].sort((a, b) => {
+      const valA = getSortableValue(a, period, key);
+      const valB = getSortableValue(b, period, key);
+
+      if (valA < valB) {
+        return direction === 'asc' ? -1 : 1;
+      }
+      if (valA > valB) {
+        return direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
   // ---------- Move expense between periods ----------
   const moveExpense = (expense, fromPeriodId, direction) => {
     const fromPeriodIndex = periods.findIndex(p => p.id === fromPeriodId);
@@ -778,6 +824,28 @@ const ExpenseTrackingApp = () => {
 
     setExpenseModal({ open: false, expense: null, periodId: null });
     triggerCelebration('Expense updated! ✨');
+  };
+
+  const ExpenseSortControl = ({ sortConfig, onSortChange }) => {
+    const handleSort = (key) => {
+      if (sortConfig.key === key) {
+        onSortChange({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
+      } else {
+        onSortChange({ key, direction: 'asc' });
+      }
+    };
+
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          onClick={() => handleSort('date')}
+          className={`px-2 py-1 rounded flex items-center gap-1 ${sortConfig.key === 'date' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'}`}
+        >
+          Sort by Date
+          {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
+        </button>
+      </div>
+    );
   };
 
   // ---------- UI subcomponents ----------
@@ -1841,9 +1909,12 @@ const ExpenseTrackingApp = () => {
         <PeriodHeader period={period} />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
-            <h4 className="font-semibold mb-3">Expenses (Click to edit • Use arrows to move between paychecks)</h4>
+            <div className="flex justify-between items-center mb-3">
+              <h4 className="font-semibold">Expenses</h4>
+              <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+            </div>
             <div className="space-y-3">
-              {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
+              {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
                 <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
               ))}
             </div>
@@ -1907,8 +1978,11 @@ const ExpenseTrackingApp = () => {
               <div key={period.id} className="space-y-4">
                 <PeriodHeader period={period} />
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-sm">Expenses</h4>
-                  {[...(period.expenses || []), ...(period.oneOffExpenses || [])].map(expense => (
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-semibold text-sm">Expenses</h4>
+                    <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+                  </div>
+                  {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
                     <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
                   ))}
                 </div>
