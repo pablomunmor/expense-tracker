@@ -6,6 +6,7 @@ import {
   Sparkles, CheckCircle
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import ExpenseForm from './ExpenseForm';
 import PaycheckCalculator from './PaycheckCalculator';
 
@@ -156,6 +157,7 @@ const ExpenseTrackingApp = () => {
   const [undoStack, setUndoStack] = useState(() => loadFromStorage('expenseTracker_undoStack', []));
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
+  const [expenseSort, setExpenseSort] = useState({ key: 'default', direction: 'asc' });
   const [expenseSort, setExpenseSort] = useState({ key: 'default', direction: 'asc' });
 
   // --- Onboarding (first-time only) ---
@@ -630,6 +632,51 @@ const ExpenseTrackingApp = () => {
     });
   };
 
+  // ---------- Expense Sorting ----------
+  const getSortableValue = (expense, period, key) => {
+    if (key === 'date') {
+      if (expense.isOneOff) {
+        return toDate(expense.createdAt)?.getTime() || 0;
+      }
+      if (period && expense.dueDate) {
+        const periodStart = toDate(period.startDate);
+        const expenseDay = expense.dueDate;
+        let dueMonth = periodStart.getMonth();
+        let dueYear = periodStart.getFullYear();
+        if (expenseDay < periodStart.getDate()) {
+          dueMonth += 1;
+          if (dueMonth > 11) {
+            dueMonth = 0;
+            dueYear += 1;
+          }
+        }
+        return new Date(dueYear, dueMonth, expenseDay).getTime();
+      }
+      return 0;
+    }
+    return expense.position ?? 0;
+  };
+
+  const sortExpenses = (expenses, period, sortConfig) => {
+    const { key, direction } = sortConfig;
+    if (key === 'default') {
+      return expenses;
+    }
+
+    return [...expenses].sort((a, b) => {
+      const valA = getSortableValue(a, period, key);
+      const valB = getSortableValue(b, period, key);
+
+      if (valA < valB) {
+        return direction === 'asc' ? -1 : 1;
+      }
+      if (valA > valB) {
+        return direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
   // ---------- Move expense between periods ----------
   const moveExpense = (expense, fromPeriodId, direction) => {
     const fromPeriodIndex = periods.findIndex(p => p.id === fromPeriodId);
@@ -825,6 +872,28 @@ const ExpenseTrackingApp = () => {
 
     setExpenseModal({ open: false, expense: null, periodId: null });
     triggerCelebration('Expense updated! ✨');
+  };
+
+  const ExpenseSortControl = ({ sortConfig, onSortChange }) => {
+    const handleSort = (key) => {
+      if (sortConfig.key === key) {
+        onSortChange({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
+      } else {
+        onSortChange({ key, direction: 'asc' });
+      }
+    };
+
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          onClick={() => handleSort('date')}
+          className={`px-2 py-1 rounded flex items-center gap-1 ${sortConfig.key === 'date' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'}`}
+        >
+          Sort by Date
+          {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
+        </button>
+      </div>
+    );
   };
 
   const ExpenseSortControl = ({ sortConfig, onSortChange }) => {
@@ -1158,8 +1227,15 @@ const ExpenseTrackingApp = () => {
       name,
       Income: data.income,
       Expenses: data.expenses,
-      Net: data.difference,
     }));
+
+    const formatAxisTick = (tick) => {
+      if (tick >= 1000) {
+        return `$${tick / 1000}k`;
+      }
+      return `$${tick}`;
+    };
+
     return (
       <div className="bg-white border rounded-lg p-6">
         <div className="flex justify-between items-center mb-6">
@@ -1172,9 +1248,9 @@ const ExpenseTrackingApp = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div>
-            <h4 className="font-semibold mb-3 flex items-center gap-2"><PieChart className="w-4 h-4" /> Category Distribution (Next 6 Months)</h4>
+            <h4 className="font-semibold mb-3 flex items-center gap-2"><PieChart className="w-4 h-4" /> Category Distribution</h4>
             <ResponsiveContainer width="100%" height={300}>
               <RechartsPieChart>
                 <Pie
@@ -1182,7 +1258,7 @@ const ExpenseTrackingApp = () => {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  outerRadius={80}
+                  outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
                   nameKey="name"
@@ -1192,7 +1268,7 @@ const ExpenseTrackingApp = () => {
                     const x = cx + radius * Math.cos(-midAngle * RADIAN);
                     const y = cy + radius * Math.sin(-midAngle * RADIAN);
                     return (
-                      <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
+                      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="12">
                         {`${(percent * 100).toFixed(0)}%`}
                       </text>
                     );
@@ -1203,18 +1279,18 @@ const ExpenseTrackingApp = () => {
                   ))}
                 </Pie>
                 <Tooltip formatter={(value) => formatCurrency(value)} />
-                <Legend />
+                <Legend layout="vertical" align="right" verticalAlign="middle" />
               </RechartsPieChart>
             </ResponsiveContainer>
           </div>
 
           <div>
-            <h4 className="font-semibold mb-3 flex items-center gap-2"><LineChart className="w-4 h-4" /> Monthly Cash Flow Trends</h4>
+            <h4 className="font-semibold mb-3 flex items-center gap-2"><LineChart className="w-4 h-4" /> Monthly Cash Flow</h4>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={trendsChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                <YAxis tickFormatter={(value) => formatCurrency(value).slice(1)} />
+                <YAxis tickFormatter={formatAxisTick} />
                 <Tooltip formatter={(value) => formatCurrency(value)} />
                 <Legend />
                 <Bar dataKey="Income" fill="#82ca9d" />
@@ -1931,7 +2007,12 @@ const ExpenseTrackingApp = () => {
               <h4 className="font-semibold">Expenses</h4>
               <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
             </div>
+            <div className="flex justify-between items-center mb-3">
+              <h4 className="font-semibold">Expenses</h4>
+              <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+            </div>
             <div className="space-y-3">
+              {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
               {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
                 <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
               ))}
@@ -1996,6 +2077,11 @@ const ExpenseTrackingApp = () => {
               <div key={period.id} className="space-y-4">
                 <PeriodHeader period={period} />
                 <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-semibold text-sm">Expenses</h4>
+                    <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+                  </div>
+                  {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
                   <div className="flex justify-between items-center">
                     <h4 className="font-semibold text-sm">Expenses</h4>
                     <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
