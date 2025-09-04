@@ -435,12 +435,18 @@ const ExpenseTrackingApp = () => {
           periodExpenses = existingPeriod.expenses.map(exp => {
             const templateExp = sourceExpenses.find(se => se.id === exp.id && se.active);
             if (templateExp) {
-              // Always sync from the template, but preserve instance-specific state
+              // --- FIX: START ---
+              // Correctly merge by spreading the instance first, then the template.
+              // This ensures updates from the template (e.g., new amount) overwrite the
+              // old values in the instance, while instance-specific properties
+              // (like `status`, `paidAmount`) are preserved.
               return {
-                ...templateExp, // Base properties from the template
-                ...exp,        // Overwrite with instance-specific properties (like status, notes)
-                periodId: i,   // Ensure periodId is correct for the current generation
+                ...exp,
+                ...templateExp,
+                id: templateExp.id, // Ensure we use the canonical ID from the template
+                periodId: i,
               };
+              // --- FIX: END ---
             }
             // If template was deleted, keep the instance as-is (it's now an orphan)
             return exp;
@@ -1484,27 +1490,33 @@ const ExpenseTrackingApp = () => {
 
     const handleScopeConfirm = () => {
       if (editScope === 'template') {
-        // Update template & propagate to current and future periods
+        // --- FIX: START ---
+        // 1. Clean the instance-specific data from the object before saving to template
+        const {
+          // Fields to strip - prefix with _ to satisfy linter
+          status: _status,
+          paidAmount: _paidAmount,
+          notes: _notes,
+          position: _position,
+          periodId: _periodId,
+          amountCleared: _amountCleared,
+          updatedAt: _updatedAt,
+          createdAt: _createdAt,
+          // The rest is clean template data
+          ...templateData
+        } = editedExpense;
+
+        // 2. Update the source-of-truth template
         setSourceExpenses(prev => prev.map(exp =>
-          exp.id === editedExpense.id ? { ...editedExpense, active: true } : exp
+          exp.id === templateData.id ? { ...templateData, active: true } : exp
         ));
+        // --- FIX: END ---
 
-        const currentPeriodIndex = periods.findIndex(p => p.id === expenseModal.periodId);
-
-        setPeriods(prev => prev.map((period, index) => {
-          if (index < currentPeriodIndex) return period;
-          return {
-            ...period,
-            expenses: (period.expenses || []).map(exp =>
-              exp.id === editedExpense.id ? {
-                ...exp,
-                ...editedExpense,
-                periodId: period.id,
-                status: index === currentPeriodIndex ? editedExpense.status : 'pending'
-              } : exp
-            )
-          };
-        }));
+        // --- REFACTOR: START ---
+        // The `generatePeriods` function is now the single source of truth for propagation.
+        // It's triggered by the `setSourceExpenses` call above via a `useEffect`.
+        // The manual `setPeriods` call here was redundant and has been removed.
+        // --- REFACTOR: END ---
 
         triggerCelebration('Expense updated for this and all future paychecks! 🔄');
       } else {
