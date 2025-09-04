@@ -7,7 +7,7 @@ const ExpenseForm = ({
   onCancel,
   categories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Entertainment', 'Healthcare', 'Debt', 'Savings', 'Other']
 }) => {
-  const getInitialFormData = () => {
+  const getInitialFormData = useCallback(() => {
     if (editingExpense) {
       return {
         ...editingExpense,
@@ -26,16 +26,22 @@ const ExpenseForm = ({
       creditLimit: 0,
       minimumPayment: 0
     };
-  };
+  }, [editingExpense]);
 
   const [formData, setFormData] = useState(getInitialFormData);
 
   useEffect(() => {
     setFormData(getInitialFormData());
-  }, [editingExpense]);
+  }, [getInitialFormData]);
 
   const handleInputChange = useCallback((field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const newFormData = { ...prev, [field]: value };
+      if (field === 'category') {
+        newFormData.isDebt = value === 'Credit Card' || value === 'Debt';
+      }
+      return newFormData;
+    });
   }, []);
 
   const handleBalanceChange = useCallback((index, field, value) => {
@@ -139,23 +145,18 @@ const ExpenseForm = ({
           </select>
         </div>
 
-        <div className="flex items-center justify-center">
-          <label className="flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.isDebt}
-              onChange={(e) => handleInputChange('isDebt', e.target.checked)}
-              className="mr-2 h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-            />
-            <span className="text-sm font-medium">Is Debt Account</span>
-          </label>
-        </div>
 
         {formData.isDebt && (
           <>
             <div className="md:col-span-2 lg:col-span-3">
               <h5 className="text-md font-medium mb-2 border-t pt-4">Debt Details</h5>
               <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center font-medium text-sm text-gray-600">
+                  <label>Balance Type</label>
+                  <label>Amount</label>
+                  <label>APR (%)</label>
+                  <label className="sr-only">Remove</label>
+                </div>
                 {formData.balances.map((balance, index) => (
                   <div key={index} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
                     <input
@@ -163,7 +164,7 @@ const ExpenseForm = ({
                       value={balance.type}
                       onChange={(e) => handleBalanceChange(index, 'type', e.target.value)}
                       className="w-full p-2 border rounded"
-                      placeholder="Balance Type (e.g., Purchases)"
+                      placeholder="e.g., Purchases"
                     />
                     <input
                       type="number"
@@ -171,7 +172,7 @@ const ExpenseForm = ({
                       value={balance.amount}
                       onChange={(e) => handleBalanceChange(index, 'amount', parseFloat(e.target.value) || 0)}
                       className="w-full p-2 border rounded"
-                      placeholder="Amount"
+                      placeholder="0.00"
                     />
                     <input
                       type="number"
@@ -179,7 +180,7 @@ const ExpenseForm = ({
                       value={balance.apr}
                       onChange={(e) => handleBalanceChange(index, 'apr', parseFloat(e.target.value) || 0)}
                       className="w-full p-2 border rounded"
-                      placeholder="APR (%)"
+                      placeholder="e.g., 21.5"
                     />
                     <button onClick={() => removeBalance(index)} className="p-2 text-red-500 hover:bg-red-100 rounded">
                       <Trash2 className="w-4 h-4" />

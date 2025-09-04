@@ -5,7 +5,6 @@ import {
   Download, Upload, Zap, Calculator, PieChart, LineChart, Menu, RotateCcw, ChevronLeft, ChevronRight,
   Sparkles, CheckCircle
 } from 'lucide-react';
-import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import ExpenseForm from './ExpenseForm';
 import PaycheckCalculator from './PaycheckCalculator';
 
@@ -201,6 +200,23 @@ const ExpenseTrackingApp = () => {
 
   // Celebration animation state
   const [celebration, setCelebration] = useState({ show: false, message: '' });
+  const [celebrationMessage, setCelebrationMessage] = useState('');
+
+  useEffect(() => {
+    if (!celebrationMessage) {
+      setCelebration({ show: false, message: '' });
+      return;
+    }
+
+    setCelebration({ show: true, message: celebrationMessage });
+    const timer = setTimeout(() => {
+      setCelebration({ show: false, message: '' });
+      setCelebrationMessage(''); // Reset the trigger
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [celebrationMessage]);
+
 
   const [debtStrategy, setDebtStrategy] = useState(() => loadFromStorage('expenseTracker_debtStrategy', 'avalanche'));
   const [extraPayment, setExtraPayment] = useState(() => loadFromStorage('expenseTracker_extraPayment', 0));
@@ -393,8 +409,7 @@ const ExpenseTrackingApp = () => {
 
   // ---------- Celebration helper ----------
   const triggerCelebration = (message) => {
-    setCelebration({ show: true, message });
-    setTimeout(() => setCelebration({ show: false, message: '' }), 3000);
+    setCelebrationMessage(message);
   };
 
   // ---------- Period generation ----------
@@ -416,31 +431,19 @@ const ExpenseTrackingApp = () => {
         let periodExpenses = [];
 
         if (existingPeriod && existingPeriod.expenses && existingPeriod.expenses.length > 0) {
-          // Keep existing expenses (they may have been moved or modified)
+          // Keep existing expenses, but sync them with the latest from the source template
           periodExpenses = existingPeriod.expenses.map(exp => {
-            // Update template-based properties but keep instance modifications
             const templateExp = sourceExpenses.find(se => se.id === exp.id && se.active);
             if (templateExp) {
-              // Only update if this expense hasn't been individually modified
-              const isIndividuallyModified = exp.amount !== templateExp.amount ||
-                exp.description !== templateExp.description ||
-                exp.category !== templateExp.category ||
-                exp.status !== 'pending' ||
-                exp.notes ||
-                exp.periodId !== i; // This indicates it was moved
-
-              if (!isIndividuallyModified) {
-                // Sync with template
-                return {
-                  ...templateExp,
-                  periodId: i,
-                  status: exp.status || 'pending',
-                  amountCleared: exp.amountCleared || templateExp.amount,
-                  position: exp.position ?? 0
-                };
-              }
+              // Always sync from the template, but preserve instance-specific state
+              return {
+                ...templateExp, // Base properties from the template
+                ...exp,        // Overwrite with instance-specific properties (like status, notes)
+                periodId: i,   // Ensure periodId is correct for the current generation
+              };
             }
-            return exp; // Keep existing expense as-is (moved or modified)
+            // If template was deleted, keep the instance as-is (it's now an orphan)
+            return exp;
           });
 
           // Add any new expenses from template that don't exist in this period
@@ -488,7 +491,11 @@ const ExpenseTrackingApp = () => {
           excludedExpenseIds: existingPeriod?.excludedExpenseIds || []
         });
       }
-      return generatedPeriods;
+      // Only update state if the generated periods are actually different.
+      if (JSON.stringify(generatedPeriods) !== JSON.stringify(prevPeriods)) {
+        return generatedPeriods;
+      }
+      return prevPeriods;
     });
   }, [sourceExpenses, incomeSettings]);
 
@@ -502,15 +509,20 @@ const ExpenseTrackingApp = () => {
   useEffect(() => {
     if (periods.length > 0) {
       // Ensure one-off arrays exist and update income
-      ensureOneOffArray(periods);
-      setPeriods(prev => prev.map(period => ({
-        ...period,
-        defaultIncome: period.type === 'A' ? incomeSettings.paycheckA : incomeSettings.paycheckB,
-        oneOffExpenses: period.oneOffExpenses || [] // Ensure this always exists
-      })));
+      setPeriods(prev => prev.map(period => {
+        // Avoid creating a new object if income is unchanged
+        const newDefaultIncome = period.type === 'A' ? incomeSettings.paycheckA : incomeSettings.paycheckB;
+        if (period.defaultIncome === newDefaultIncome) {
+          return period;
+        }
+        return {
+          ...period,
+          defaultIncome: newDefaultIncome,
+          oneOffExpenses: period.oneOffExpenses || [] // Ensure this always exists
+        };
+      }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incomeSettings]);
+  }, [incomeSettings.paycheckA, incomeSettings.paycheckB, periods.length]); // Depend on specific values
 
   // ---------- Utils ----------
   const calculateInterestForPeriod = (amount, apr) => {
@@ -549,9 +561,18 @@ const ExpenseTrackingApp = () => {
     triggerCelebration('Interest applied to all debt accounts! 💸');
   };
 
+  useEffect(() => {
+    if (!lastUpdatedDebt) return;
+
+    const timer = setTimeout(() => {
+      setLastUpdatedDebt(null);
+    }, 1000); // Animation duration
+
+    return () => clearTimeout(timer);
+  }, [lastUpdatedDebt]);
+
   const applyPaymentToDebt = (debt, paymentAmount) => {
     setLastUpdatedDebt(debt.id);
-    setTimeout(() => setLastUpdatedDebt(null), 1000); // Animation duration
 
     const sortedBalances = [...debt.balances].sort((a, b) => b.apr - a.apr);
     let remainingPayment = paymentAmount;
@@ -626,42 +647,81 @@ const ExpenseTrackingApp = () => {
 
   const calculateDebtPayoff = () => {
     const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
-    const totalDebt = debtExpenses.reduce((sum, exp) => sum + getTotalBalance(exp.balances), 0);
-    const monthlyPayments = debtExpenses.reduce((sum, exp) => sum + exp.minimumPayment, 0);
+    // Create a deep clone for simulation to not mutate original state
+    let simulatedDebts = structuredClone(debtExpenses);
 
-    const sortedDebts = [...debtExpenses].sort((a, b) => {
-      if (debtStrategy === 'snowball') return getTotalBalance(a.balances) - getTotalBalance(b.balances);
-      if (debtStrategy === 'avalanche') return b.balances[0].apr - a.balances[0].apr;
-      return 0;
+    const totalDebt = simulatedDebts.reduce((sum, exp) => sum + getTotalBalance(exp.balances), 0);
+    const monthlyPayments = simulatedDebts.reduce((sum, exp) => sum + exp.minimumPayment, 0);
+
+    // Sort the debts themselves based on the chosen strategy
+    simulatedDebts.sort((a, b) => {
+      if (debtStrategy === 'snowball') {
+        return getTotalBalance(a.balances) - getTotalBalance(b.balances);
+      }
+      // Avalanche strategy
+      const maxAprA = Math.max(0, ...a.balances.map(bal => bal.apr));
+      const maxAprB = Math.max(0, ...b.balances.map(bal => bal.apr));
+      return maxAprB - maxAprA;
     });
 
-    let totalInterest = 0;
-    let month = 0;
-    let remainingDebts = sortedDebts.map(debt => ({ ...debt }));
-    const totalExtraPayment = parseFloat(extraPayment) || 0;
+    let totalInterestPaid = 0;
+    let months = 0;
+    const extraMonthlyPayment = parseFloat(extraPayment) || 0;
 
-    while (remainingDebts.length > 0 && month < 360) {
-      month++;
-      let extraThisMonth = totalExtraPayment;
+    while (simulatedDebts.some(d => getTotalBalance(d.balances) > 0) && months < 480) { // 40 year limit
+      months++;
+      let extraPaymentThisMonth = extraMonthlyPayment;
 
-      remainingDebts.forEach((debt, index) => {
-        const monthlyInterest = (debt.balance * debt.apr / 100) / 12;
-        totalInterest += monthlyInterest;
+      // First, accrue interest on all balances
+      for (const debt of simulatedDebts) {
+        let monthlyInterestForDebt = 0;
+        debt.balances.forEach(balance => {
+          const interest = (balance.amount * (balance.apr / 100)) / 12;
+          monthlyInterestForDebt += interest;
+          balance.amount += interest; // Accrue interest
+        });
+        totalInterestPaid += monthlyInterestForDebt;
+      }
 
-        let payment = debt.minimumPayment;
-        if (index === 0 && extraThisMonth > 0) {
-          payment += extraThisMonth;
-          extraThisMonth = 0;
+      // Then, apply payments
+      let paymentAppliedToExtraTarget = false;
+      for (const debt of simulatedDebts) {
+        let paymentAmount = debt.minimumPayment;
+
+        // The first debt in the sorted list gets the extra payment
+        if (!paymentAppliedToExtraTarget && getTotalBalance(debt.balances) > 0) {
+          paymentAmount += extraPaymentThisMonth;
+          paymentAppliedToExtraTarget = true;
         }
 
-        const principalPayment = Math.min(payment - monthlyInterest, debt.balance);
-        debt.balance = Math.max(0, debt.balance - principalPayment);
-      });
+        // Sort balances within the debt by APR (for avalanche-style payment within the debt)
+        debt.balances.sort((a, b) => b.apr - a.apr);
 
-      remainingDebts = remainingDebts.filter(debt => debt.balance > 0);
+        let remainingPayment = paymentAmount;
+        debt.balances.forEach(balance => {
+          if (remainingPayment <= 0) return;
+          const paymentForBalance = Math.min(remainingPayment, balance.amount);
+          balance.amount -= paymentForBalance;
+          remainingPayment -= paymentForBalance;
+        });
+      }
+
+      // Remove any debts that are fully paid off
+      simulatedDebts = simulatedDebts.filter(d => getTotalBalance(d.balances) > 0.01);
     }
 
-    return { totalDebt, monthlyPayments, payoffMonths: month, totalInterest, sortedDebts };
+    return {
+      totalDebt,
+      monthlyPayments,
+      payoffMonths: months,
+      totalInterest: totalInterestPaid,
+      sortedDebts: debtExpenses.sort((a, b) => { // Return a sorted list for display
+        if (debtStrategy === 'snowball') return getTotalBalance(a.balances) - getTotalBalance(b.balances);
+        const maxAprA = Math.max(0, ...a.balances.map(bal => bal.apr));
+        const maxAprB = Math.max(0, ...b.balances.map(bal => bal.apr));
+        return maxAprB - maxAprA;
+      })
+    };
   };
 
   // ---------- Expense Sorting ----------
@@ -1266,20 +1326,6 @@ const ExpenseTrackingApp = () => {
 
   const AdvancedAnalytics = () => {
     const { categoryTotals, monthlyTrends } = getAnalyticsData();
-    const categoryChartData = Object.entries(categoryTotals).map(([name, value]) => ({ name, value }));
-    const COLORS = Object.keys(categoryTotals).map((_, index) => `hsl(${index * 45}, 70%, 60%)`);
-    const trendsChartData = Object.entries(monthlyTrends).map(([name, data]) => ({
-      name,
-      Income: data.income,
-      Expenses: data.expenses,
-    }));
-
-    const formatAxisTick = (tick) => {
-      if (tick >= 1000) {
-        return `$${tick / 1000}k`;
-      }
-      return `$${tick}`;
-    };
 
     return (
       <div className="bg-white border rounded-lg p-6">
@@ -1293,61 +1339,13 @@ const ExpenseTrackingApp = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div>
-            <h4 className="font-semibold mb-3 flex items-center gap-2"><PieChart className="w-4 h-4" /> Category Distribution</h4>
-            <ResponsiveContainer width="100%" height={300}>
-              <RechartsPieChart>
-                <Pie
-                  data={categoryChartData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                  nameKey="name"
-                  label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                    const RADIAN = Math.PI / 180;
-                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                    return (
-                      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="12">
-                        {`${(percent * 100).toFixed(0)}%`}
-                      </text>
-                    );
-                  }}
-                >
-                  {categoryChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatCurrency(value)} />
-                <Legend layout="vertical" align="right" verticalAlign="middle" />
-              </RechartsPieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div>
-            <h4 className="font-semibold mb-3 flex items-center gap-2"><LineChart className="w-4 h-4" /> Monthly Cash Flow</h4>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trendsChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis tickFormatter={formatAxisTick} />
-                <Tooltip formatter={(value) => formatCurrency(value)} />
-                <Legend />
-                <Bar dataKey="Income" fill="#82ca9d" />
-                <Bar dataKey="Expenses" fill="#8884d8" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="text-center py-10">
+          <p className="text-gray-500">Graphing functionality has been temporarily disabled to resolve a build issue.</p>
         </div>
 
-        <div className="mt-6 pt-6 border-t">
+        <div className="mt-8">
           <h4 className="font-semibold mb-3">Financial Health Metrics</h4>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-blue-50 p-3 rounded"><div className="text-blue-600 text-sm">Avg Monthly Savings</div>
               <div className="font-bold text-blue-700">
                 {formatCurrency(Object.values(monthlyTrends).reduce((sum, m) => sum + m.difference, 0) / Math.max(1, Object.keys(monthlyTrends).length))}
@@ -1370,7 +1368,9 @@ const ExpenseTrackingApp = () => {
     );
   };
 
-  const PeriodHeader = ({ period }) => {
+
+
+  function PeriodHeader({ period }) {
     const totals = calculatePeriodTotals(period);
 
     return (
@@ -1445,7 +1445,7 @@ const ExpenseTrackingApp = () => {
         </div>
       </div>
     );
-  };
+  }
 
   // Expense Edit Modal Component
   const ExpenseEditModal = () => {
@@ -1720,15 +1720,6 @@ const ExpenseTrackingApp = () => {
       dueDateStr = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
-
-    // Route status updates based on whether it's a one-off
-    const setStatus = (newStatus) => {
-      if (expense.isOneOff) {
-        updateOneOff(periods, setPeriods, periodId, expense.id, { status: newStatus });
-      } else {
-        updateExpenseStatus(periodId, expense.id, { status: newStatus });
-      }
-    };
 
     const handleSetCleared = () => {
       const patch = { status: 'cleared', paidAmount: expense.amount };
