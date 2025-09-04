@@ -127,7 +127,7 @@ const ExpenseTrackingApp = () => {
   const [sourceExpenses, setSourceExpenses] = useState(() =>
     loadFromStorage('expenseTracker_sourceExpenses', [
       { id: 1, description: 'Rent', category: 'Housing', amount: 1200, dueDate: 1, paycheckAssignment: 'A', isDebt: false, active: true },
-      { id: 2, description: 'Credit Card', category: 'Debt', amount: 150, dueDate: 15, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Purchases', amount: 3500, apr: 18.5 }], creditLimit: 5000, minimumPayment: 150, active: true },
+      { id: 2, description: 'Credit Card', category: 'Credit Card', amount: 150, dueDate: 15, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Purchases', amount: 3500, apr: 18.5 }], creditLimit: 5000, minimumPayment: 150, active: true },
       { id: 3, description: 'Groceries', category: 'Food', amount: 400, dueDate: 10, paycheckAssignment: 'A', isDebt: false, active: true },
       { id: 4, description: 'Car Payment', category: 'Transportation', amount: 350, dueDate: 20, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Main Balance', amount: 8500, apr: 4.5 }], creditLimit: 10000, minimumPayment: 350, active: true },
       { id: 5, description: 'Utilities', category: 'Housing', amount: 150, dueDate: 5, paycheckAssignment: 'A', isDebt: false, active: true },
@@ -389,7 +389,7 @@ const ExpenseTrackingApp = () => {
   useEffect(() => { saveToStorage('expenseTracker_extraPayment', extraPayment); }, [extraPayment]);
   useEffect(() => { saveToStorage('expenseTracker_undoStack', undoStack); }, [undoStack]);
 
-  const categories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Entertainment', 'Healthcare', 'Debt', 'Savings', 'Other'];
+  const categories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Entertainment', 'Healthcare', 'Debt', 'Credit Card', 'Savings', 'Other'];
 
   // ---------- Celebration helper ----------
   const triggerCelebration = (message) => {
@@ -482,6 +482,7 @@ const ExpenseTrackingApp = () => {
           additionalIncome: existingPeriod?.additionalIncome || 0,
           expenses: periodExpenses,
           status: 'active',
+          interestApplied: existingPeriod?.interestApplied || false,
           // ✅ Preserve existing one-off expenses
           oneOffExpenses: existingOneOffs,
           excludedExpenseIds: existingPeriod?.excludedExpenseIds || []
@@ -522,7 +523,7 @@ const ExpenseTrackingApp = () => {
     setSourceExpenses(prevExpenses => {
       const newExpenses = structuredClone(prevExpenses);
       return newExpenses.map(exp => {
-        if (exp.isDebt) {
+        if (exp.isDebt && exp.category === 'Credit Card') {
           const newBalances = exp.balances.map(balance => {
             const interest = calculateInterestForPeriod(balance.amount, balance.apr);
             return {
@@ -535,6 +536,16 @@ const ExpenseTrackingApp = () => {
         return exp;
       });
     });
+
+    setPeriods(prevPeriods => {
+      return prevPeriods.map(p => {
+        if (p.id === periodId) {
+          return { ...p, interestApplied: true };
+        }
+        return p;
+      });
+    });
+
     triggerCelebration('Interest applied to all debt accounts! 💸');
   };
 
@@ -1386,9 +1397,10 @@ const ExpenseTrackingApp = () => {
         </button>
         <button
           onClick={() => handleApplyInterest(period.id)}
-          className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
+          className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={period.interestApplied}
         >
-          Apply Interest
+          {period.interestApplied ? 'Interest Applied' : 'Apply Interest'}
         </button>
 
         {/* 2) Thin row for Paycheck chip + Net Income */}
@@ -1834,7 +1846,7 @@ const ExpenseTrackingApp = () => {
   };
   // ===================== /ExpenseItem =====================
 
-  const DebtSummary = () => {
+  const DebtSummary = ({ sourceExpenses }) => {
     const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
     const totalDebt = debtExpenses.reduce((sum, exp) => sum + getTotalBalance(exp.balances), 0);
     const monthlyPayments = debtExpenses.reduce((sum, exp) => sum + exp.minimumPayment, 0);
@@ -2091,7 +2103,7 @@ const ExpenseTrackingApp = () => {
             </div>
           </div>
           <div className="space-y-4">
-            <DebtSummary />
+            <DebtSummary sourceExpenses={sourceExpenses} />
             <Analytics />
           </div>
         </div>
@@ -2173,7 +2185,7 @@ const ExpenseTrackingApp = () => {
 
         {/* Keep your summary widgets */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DebtSummary />
+          <DebtSummary sourceExpenses={sourceExpenses} />
           <Analytics />
         </div>
       </div>
@@ -2185,7 +2197,7 @@ const ExpenseTrackingApp = () => {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <DebtSummary />
+          <DebtSummary sourceExpenses={sourceExpenses} />
           <Analytics />
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2"><TrendingUp className="w-5 h-5" /> Next 3 Months</h3>
