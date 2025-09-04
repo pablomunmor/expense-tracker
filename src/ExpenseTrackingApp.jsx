@@ -508,33 +508,19 @@ const ExpenseTrackingApp = () => {
     const oneOffs = period.oneOffExpenses || [];
     const allExpenses = [...baseExpenses, ...oneOffs];
 
-    // Expenses should be calculated based on the original amount, not the remaining amount
-    const totalExpenses = allExpenses.reduce((sum, exp) => sum + (exp.originalAmount || exp.amount), 0);
+    const totalExpenses = allExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-    // Paid totals need to account for partial payments
     const totalPaid = allExpenses.reduce((sum, exp) => {
-      // If it was cleared, the full original amount is considered paid.
       if (exp.status === 'cleared') {
-        return sum + (exp.originalAmount || exp.amount);
+        return sum + exp.amount;
       }
-      // If it was marked as 'paid' (e.g. fully paid via partials, or manually),
-      // use the paidAmount if available, otherwise the full amount.
-      if (exp.status === 'paid') {
-        return sum + (exp.paidAmount || exp.originalAmount || exp.amount);
-      }
-      // For pending items, just add any partial payments.
+      // For 'paid' or 'pending' statuses, only count the paid amount.
       return sum + (exp.paidAmount || 0);
     }, 0);
 
-
-    // Unpaid (only pending expenses - 'paid' expenses are considered committed but not yet cleared)
-    const unpaidAmount =
-      baseExpenses
-        .filter(exp => exp.status === 'pending' || exp.status === 'paid')
-        .reduce((sum, exp) => sum + exp.amount, 0) +
-      oneOffs
-        .filter(exp => exp.status === 'pending' || exp.status === 'paid')
-        .reduce((sum, exp) => sum + exp.amount, 0);
+    const unpaidAmount = allExpenses
+      .filter(exp => exp.status !== 'cleared')
+      .reduce((sum, exp) => sum + exp.amount, 0);
 
     return {
       totalIncome,
@@ -745,22 +731,22 @@ const ExpenseTrackingApp = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  const updateExpenseStatus = (periodId, expenseId, newStatus, amountCleared = null) => {
+  const updateExpenseStatus = (periodId, expenseId, patch) => {
     setPeriods(prev => prev.map(period => {
       if (period.id !== periodId) return period;
       return {
         ...period,
         expenses: period.expenses.map(exp => {
           if (exp.id !== expenseId) return exp;
-          return { ...exp, status: newStatus, amountCleared: amountCleared !== null ? amountCleared : exp.amountCleared };
+          return { ...exp, ...patch };
         })
       };
     }));
 
-    if (newStatus === 'cleared') {
+    if (patch.status === 'cleared') {
       triggerCelebration('Expense cleared! ✅');
-    } else if (newStatus === 'paid') {
-      triggerCelebration('Payment recorded! 💳');
+    } else if (patch.status === 'paid') {
+      triggerCelebration('Payment recorded! 💰');
     }
   };
 
@@ -791,13 +777,12 @@ const ExpenseTrackingApp = () => {
 
     // The modal's "amount" field represents the total amount.
     // Compare it to the original total to see if it changed.
-    const originalTotalAmount = originalExpense.originalAmount || originalExpense.amount;
+    const originalTotalAmount = originalExpense.amount;
 
     if (finalExpense.amount !== originalTotalAmount) {
       // If the total amount was changed, we must reset this instance's partial
       // payment history to prevent data inconsistency (e.g., paid > new total).
       finalExpense.paidAmount = 0;
-      finalExpense.originalAmount = null; // The `amount` field is now the source of truth.
       // If status was paid/cleared, it's now pending since the total is different.
       if (finalExpense.status === 'paid' || finalExpense.status === 'cleared') {
         finalExpense.status = 'pending';
@@ -806,7 +791,6 @@ const ExpenseTrackingApp = () => {
       // If the total amount is unchanged, we must restore the original partial
       // payment data, because the modal editor flattened it for the UI.
       finalExpense.amount = originalExpense.amount;
-      finalExpense.originalAmount = originalExpense.originalAmount;
       finalExpense.paidAmount = originalExpense.paidAmount;
     }
 
@@ -1355,7 +1339,7 @@ const ExpenseTrackingApp = () => {
         // We create a temporary, flattened object for editing.
         setEditedExpense({
           ...expense,
-          amount: expense.originalAmount || expense.amount,
+          amount: expense.amount,
         });
       } else {
         setEditedExpense(null);
@@ -1510,7 +1494,7 @@ const ExpenseTrackingApp = () => {
 
     if (!open || !expense) return null;
 
-    const remainingAmount = expense.originalAmount ? expense.originalAmount - (expense.paidAmount || 0) : expense.amount;
+    const remainingAmount = expense.amount - (expense.paidAmount || 0);
 
     const handleSave = () => {
       const paymentAmount = parseFloat(amount);
@@ -1528,16 +1512,11 @@ const ExpenseTrackingApp = () => {
 
         const update = (exp) => {
           if (exp.id === expense.id) {
-            const originalAmount = exp.originalAmount || exp.amount;
             const paidAmount = (exp.paidAmount || 0) + paymentAmount;
-            const newAmount = originalAmount - paidAmount;
-
             return {
               ...exp,
-              originalAmount: originalAmount,
               paidAmount: paidAmount,
-              amount: newAmount,
-              status: newAmount <= 0.001 ? 'paid' : 'pending' // Use a small epsilon for float comparison
+              status: 'paid',
             };
           }
           return exp;
@@ -1554,7 +1533,7 @@ const ExpenseTrackingApp = () => {
         return newPeriods;
       });
 
-      triggerCelebration('Partial payment recorded! 💰');
+      triggerCelebration('Payment recorded! 💰');
       handleClose();
     };
 
@@ -1625,7 +1604,16 @@ const ExpenseTrackingApp = () => {
       if (expense.isOneOff) {
         updateOneOff(periods, setPeriods, periodId, expense.id, { status: newStatus });
       } else {
-        updateExpenseStatus(periodId, expense.id, newStatus);
+        updateExpenseStatus(periodId, expense.id, { status: newStatus });
+      }
+    };
+
+    const handleSetCleared = () => {
+      const patch = { status: 'cleared', paidAmount: expense.amount };
+      if (expense.isOneOff) {
+        updateOneOff(periods, setPeriods, periodId, expense.id, patch);
+      } else {
+        updateExpenseStatus(periodId, expense.id, patch);
       }
     };
 
@@ -1661,9 +1649,9 @@ const ExpenseTrackingApp = () => {
 
           <div className="text-right pointer-events-none">
             <div className="font-semibold">{formatCurrency(expense.amount)}</div>
-            {expense.originalAmount && (
+            {expense.paidAmount > 0 && (
               <div className="text-xs text-gray-500">
-                of {formatCurrency(expense.originalAmount)}
+                {formatCurrency(expense.paidAmount)} paid
               </div>
             )}
             {expense.isDebt && (
@@ -1707,12 +1695,12 @@ const ExpenseTrackingApp = () => {
             <button
               onClick={() => setPartialPaymentModal({ open: true, expense, periodId })}
               className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-              disabled={expense.status === 'cleared' || expense.status === 'paid'}
+              disabled={expense.status === 'cleared' || (expense.paidAmount || 0) >= expense.amount}
             >
               Pay
             </button>
             <button
-              onClick={() => setStatus('cleared')}
+              onClick={handleSetCleared}
               className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
             >
               Cleared
