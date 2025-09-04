@@ -157,6 +157,7 @@ const ExpenseTrackingApp = () => {
   const [oneOffModal, setOneOffModal] = useState({ open: false, periodId: null, editingId: null, fields: null });
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
   const [expenseSort, setExpenseSort] = useState({ key: 'default', direction: 'asc' });
+  const [expenseFilter, setExpenseFilter] = useState('all');
 
 
   // --- Onboarding (first-time only) ---
@@ -818,30 +819,53 @@ const ExpenseTrackingApp = () => {
     triggerCelebration('Expense updated! ✨');
   };
 
+  const ExpenseFilterControl = ({ filter, onFilterChange }) => {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <label htmlFor="filter-select" className="sr-only">Filter by</label>
+        <select
+          id="filter-select"
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          className="p-1 border rounded bg-gray-100"
+        >
+          <option value="all">All</option>
+          <option value="pending">Pending</option>
+          <option value="paid">Paid</option>
+          <option value="cleared">Cleared</option>
+        </select>
+      </div>
+    );
+  };
+
   const ExpenseSortControl = ({ sortConfig, onSortChange }) => {
-    const handleSort = (key) => {
-      if (sortConfig.key === key) {
-        onSortChange({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
-      } else {
-        onSortChange({ key, direction: 'asc' });
-      }
+    const handleSortKeyChange = (e) => {
+      onSortChange({ ...sortConfig, key: e.target.value });
+    };
+
+    const toggleDirection = () => {
+      onSortChange({ ...sortConfig, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
     };
 
     return (
       <div className="flex items-center gap-2 text-sm">
-        <button
-          onClick={() => handleSort('date')}
-          className={`px-2 py-1 rounded flex items-center gap-1 ${sortConfig.key === 'date' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'}`}
+        <label htmlFor="sort-select" className="sr-only">Sort by</label>
+        <select
+          id="sort-select"
+          value={sortConfig.key}
+          onChange={handleSortKeyChange}
+          className="p-1 border rounded bg-gray-100"
         >
-          Sort by Date
-          {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
-        </button>
+          <option value="default">Default</option>
+          <option value="date">Date</option>
+          <option value="status">Status</option>
+        </select>
         <button
-          onClick={() => handleSort('status')}
-          className={`px-2 py-1 rounded flex items-center gap-1 ${sortConfig.key === 'status' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'}`}
+          onClick={toggleDirection}
+          className="p-1 rounded bg-gray-100"
+          aria-label={`Sort direction: ${sortConfig.direction === 'asc' ? 'ascending' : 'descending'}`}
         >
-          Sort by Status
-          {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
+          {sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </div>
     );
@@ -1945,14 +1969,19 @@ const ExpenseTrackingApp = () => {
           <div className="lg:col-span-2">
             <div className="flex justify-between items-center mb-3">
               <h4 className="font-semibold">Expenses</h4>
-              <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
-            </div>
-            <div className="flex justify-between items-center mb-3">
-              <h4 className="font-semibold">Expenses</h4>
-              <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+              <div className="flex gap-2">
+                <ExpenseFilterControl filter={expenseFilter} onFilterChange={setExpenseFilter} />
+                <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+              </div>
             </div>
             <div className="space-y-3">
-              {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
+              {sortExpenses(
+                [...(period.expenses || []), ...(period.oneOffExpenses || [])].filter(expense =>
+                  expenseFilter === 'all' || expense.status === expenseFilter
+                ),
+                period,
+                expenseSort
+              ).map(expense => (
                 <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
               ))}
             </div>
@@ -2018,9 +2047,18 @@ const ExpenseTrackingApp = () => {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <h4 className="font-semibold text-sm">Expenses</h4>
-                    <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+                    <div className="flex gap-2">
+                      <ExpenseFilterControl filter={expenseFilter} onFilterChange={setExpenseFilter} />
+                      <ExpenseSortControl sortConfig={expenseSort} onSortChange={setExpenseSort} />
+                    </div>
                   </div>
-                  {sortExpenses([...(period.expenses || []), ...(period.oneOffExpenses || [])], period, expenseSort).map(expense => (
+                  {sortExpenses(
+                    [...(period.expenses || []), ...(period.oneOffExpenses || [])].filter(expense =>
+                      expenseFilter === 'all' || expense.status === expenseFilter
+                    ),
+                    period,
+                    expenseSort
+                  ).map(expense => (
                     <ExpenseItem key={expense.id} expense={expense} periodId={period.id} />
                   ))}
                 </div>
