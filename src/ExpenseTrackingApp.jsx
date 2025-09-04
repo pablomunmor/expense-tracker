@@ -127,11 +127,11 @@ const ExpenseTrackingApp = () => {
   const [sourceExpenses, setSourceExpenses] = useState(() =>
     loadFromStorage('expenseTracker_sourceExpenses', [
       { id: 1, description: 'Rent', category: 'Housing', amount: 1200, dueDate: 1, paycheckAssignment: 'A', isDebt: false, active: true },
-      { id: 2, description: 'Credit Card', category: 'Debt', amount: 150, dueDate: 15, paycheckAssignment: 'B', isDebt: true, balance: 3500, apr: 18.5, minimumPayment: 150, active: true },
+      { id: 2, description: 'Credit Card', category: 'Debt', amount: 150, dueDate: 15, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Purchases', amount: 3500, apr: 18.5 }], creditLimit: 5000, minimumPayment: 150, active: true },
       { id: 3, description: 'Groceries', category: 'Food', amount: 400, dueDate: 10, paycheckAssignment: 'A', isDebt: false, active: true },
-      { id: 4, description: 'Car Payment', category: 'Transportation', amount: 350, dueDate: 20, paycheckAssignment: 'B', isDebt: true, balance: 8500, apr: 4.5, minimumPayment: 350, active: true },
+      { id: 4, description: 'Car Payment', category: 'Transportation', amount: 350, dueDate: 20, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Main Balance', amount: 8500, apr: 4.5 }], creditLimit: 10000, minimumPayment: 350, active: true },
       { id: 5, description: 'Utilities', category: 'Housing', amount: 150, dueDate: 5, paycheckAssignment: 'A', isDebt: false, active: true },
-      { id: 6, description: 'Student Loan', category: 'Debt', amount: 200, dueDate: 25, paycheckAssignment: 'B', isDebt: true, balance: 15000, apr: 6.8, minimumPayment: 200, active: true },
+      { id: 6, description: 'Student Loan', category: 'Debt', amount: 200, dueDate: 25, paycheckAssignment: 'B', isDebt: true, balances: [{ type: 'Main Balance', amount: 15000, apr: 6.8 }], creditLimit: 20000, minimumPayment: 200, active: true },
     ])
   );
 
@@ -158,7 +158,28 @@ const ExpenseTrackingApp = () => {
   const [showPaycheckCalculator, setShowPaycheckCalculator] = useState(false);
   const [expenseSort, setExpenseSort] = useState({ key: 'default', direction: 'asc' });
   const [expenseFilter, setExpenseFilter] = useState('all');
+  const [lastUpdatedDebt, setLastUpdatedDebt] = useState(null);
 
+
+  useEffect(() => {
+    // Data migration for debts from single balance to balances array
+    const needsMigration = sourceExpenses.some(exp => exp.isDebt && exp.balance !== undefined);
+    if (needsMigration) {
+      const migratedExpenses = sourceExpenses.map(exp => {
+        if (exp.isDebt && exp.balance !== undefined) {
+          const { balance, apr, ...rest } = exp;
+          return {
+            ...rest,
+            balances: [{ type: 'Main Balance', amount: balance, apr: apr || 0 }],
+            creditLimit: balance * 1.2, // Sensible default for migration
+          };
+        }
+        return exp;
+      });
+      setSourceExpenses(migratedExpenses);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount
 
   // --- Onboarding (first-time only) ---
   const [showOnboarding, setShowOnboarding] = useState(() =>
@@ -491,6 +512,63 @@ const ExpenseTrackingApp = () => {
   }, [incomeSettings]);
 
   // ---------- Utils ----------
+  const calculateInterestForPeriod = (amount, apr) => {
+    const dailyRate = apr / 100 / 365;
+    const periodInterest = amount * dailyRate * 14; // 14 days in a period
+    return periodInterest;
+  };
+
+  const handleApplyInterest = (periodId) => {
+    setSourceExpenses(prevExpenses => {
+      const newExpenses = structuredClone(prevExpenses);
+      return newExpenses.map(exp => {
+        if (exp.isDebt) {
+          const newBalances = exp.balances.map(balance => {
+            const interest = calculateInterestForPeriod(balance.amount, balance.apr);
+            return {
+              ...balance,
+              amount: balance.amount + interest
+            };
+          });
+          return { ...exp, balances: newBalances };
+        }
+        return exp;
+      });
+    });
+    triggerCelebration('Interest applied to all debt accounts! 💸');
+  };
+
+  const applyPaymentToDebt = (debt, paymentAmount) => {
+    setLastUpdatedDebt(debt.id);
+    setTimeout(() => setLastUpdatedDebt(null), 1000); // Animation duration
+
+    const sortedBalances = [...debt.balances].sort((a, b) => b.apr - a.apr);
+    let remainingPayment = paymentAmount;
+
+    const newBalances = sortedBalances.map(balance => {
+      if (remainingPayment <= 0) return balance;
+
+      const paymentForThisBalance = Math.min(remainingPayment, balance.amount);
+      remainingPayment -= paymentForThisBalance;
+      return {
+        ...balance,
+        amount: balance.amount - paymentForThisBalance
+      };
+    });
+
+    // This part is to preserve the original order of balances if needed, though it's not strictly necessary if order doesn't matter.
+    const finalBalances = debt.balances.map(originalBalance => {
+      const updated = newBalances.find(nb => nb.type === originalBalance.type);
+      return updated || originalBalance;
+    });
+
+
+    return {
+      ...debt,
+      balances: finalBalances
+    };
+  };
+
   const formatCurrency = (amount) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
@@ -533,14 +611,16 @@ const ExpenseTrackingApp = () => {
     };
   };
 
+  const getTotalBalance = (balances = []) => balances.reduce((s, b) => s + b.amount, 0);
+
   const calculateDebtPayoff = () => {
     const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
-    const totalDebt = debtExpenses.reduce((sum, exp) => sum + exp.balance, 0);
+    const totalDebt = debtExpenses.reduce((sum, exp) => sum + getTotalBalance(exp.balances), 0);
     const monthlyPayments = debtExpenses.reduce((sum, exp) => sum + exp.minimumPayment, 0);
 
     const sortedDebts = [...debtExpenses].sort((a, b) => {
-      if (debtStrategy === 'snowball') return a.balance - b.balance;
-      if (debtStrategy === 'avalanche') return b.apr - a.apr;
+      if (debtStrategy === 'snowball') return getTotalBalance(a.balances) - getTotalBalance(b.balances);
+      if (debtStrategy === 'avalanche') return b.balances[0].apr - a.balances[0].apr;
       return 0;
     });
 
@@ -1071,7 +1151,7 @@ const ExpenseTrackingApp = () => {
 
                 <div className="text-sm text-gray-600">
                   {expense.category} • Due: {expense.dueDate} • Paycheck {expense.paycheckAssignment}
-                  {expense.isDebt && ` • Balance: ${formatCurrency(expense.balance)} @ ${expense.apr}% APR`}
+                  {expense.isDebt && ` • Balance: ${formatCurrency(getTotalBalance(expense.balances))}`}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1158,10 +1238,10 @@ const ExpenseTrackingApp = () => {
                 <div key={debt.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                   <div>
                     <div className="font-medium text-sm">{index + 1}. {debt.description}</div>
-                    <div className="text-xs text-gray-600">{debt.apr}% APR</div>
+                    <div className="text-xs text-gray-600">{debt.balances[0].apr}% APR</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-semibold text-sm">{formatCurrency(debt.balance)}</div>
+                    <div className="font-semibold text-sm">{formatCurrency(getTotalBalance(debt.balances))}</div>
                     <div className="text-xs text-gray-600">{formatCurrency(debt.minimumPayment)}/mo</div>
                   </div>
                 </div>
@@ -1303,6 +1383,12 @@ const ExpenseTrackingApp = () => {
           className="px-2 py-1 text-xs bg-gray-100 rounded hover:bg-gray-200"
         >
           Add One‑Off
+        </button>
+        <button
+          onClick={() => handleApplyInterest(period.id)}
+          className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
+        >
+          Apply Interest
         </button>
 
         {/* 2) Thin row for Paycheck chip + Net Income */}
@@ -1639,6 +1725,18 @@ const ExpenseTrackingApp = () => {
       } else {
         updateExpenseStatus(periodId, expense.id, patch);
       }
+
+      // If the cleared expense is a debt payment, update the source debt
+      if (expense.isDebt) {
+        setSourceExpenses(prevSourceExpenses => {
+          const sourceDebt = prevSourceExpenses.find(se => se.description === expense.description && se.isDebt);
+          if (sourceDebt) {
+            const updatedDebt = applyPaymentToDebt(sourceDebt, expense.amount);
+            return prevSourceExpenses.map(se => se.id === sourceDebt.id ? updatedDebt : se);
+          }
+          return prevSourceExpenses;
+        });
+      }
     };
 
     const statusColorClass = {
@@ -1680,7 +1778,7 @@ const ExpenseTrackingApp = () => {
             )}
             {expense.isDebt && (
               <div className="text-xs text-purple-600">
-                Balance: {formatCurrency(expense.balance)}
+                Balance: {formatCurrency(getTotalBalance(expense.balances))}
               </div>
             )}
           </div>
@@ -1738,7 +1836,7 @@ const ExpenseTrackingApp = () => {
 
   const DebtSummary = () => {
     const debtExpenses = sourceExpenses.filter(exp => exp.isDebt && exp.active);
-    const totalDebt = debtExpenses.reduce((sum, exp) => sum + exp.balance, 0);
+    const totalDebt = debtExpenses.reduce((sum, exp) => sum + getTotalBalance(exp.balances), 0);
     const monthlyPayments = debtExpenses.reduce((sum, exp) => sum + exp.minimumPayment, 0);
     return (
       <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -1748,15 +1846,21 @@ const ExpenseTrackingApp = () => {
           <div><div className="text-purple-600">Monthly Payments</div><div className="font-bold text-purple-800">{formatCurrency(monthlyPayments)}</div></div>
         </div>
         <div className="space-y-2">
-          {debtExpenses.map(debt => (
-            <div key={debt.id} className="flex justify-between items-center text-sm">
-              <span>{debt.description}</span>
-              <div className="text-right">
-                <div className="font-medium">{formatCurrency(debt.balance)}</div>
-                <div className="text-xs text-purple-600">{debt.apr}% APR</div>
+          {debtExpenses.map(debt => {
+            const totalBalance = getTotalBalance(debt.balances);
+            const availableCredit = debt.creditLimit - totalBalance;
+            return (
+              <div key={debt.id} className={`flex justify-between items-center text-sm p-1 rounded-md transition-all duration-500 ${lastUpdatedDebt === debt.id ? 'bg-green-200' : ''}`}>
+                <span>{debt.description}</span>
+                <div className="text-right">
+                  <div className="font-medium">{formatCurrency(totalBalance)}</div>
+                  <div className={`text-xs ${availableCredit < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                    Avail: {formatCurrency(availableCredit)}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <button onClick={() => setShowDebtTools(true)} className="w-full mt-3 px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 flex items-center justify-center gap-2">
           <Calculator className="w-4 h-4" /> Payoff Calculator
