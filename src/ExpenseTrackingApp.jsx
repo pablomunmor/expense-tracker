@@ -608,6 +608,10 @@ const ExpenseTrackingApp = () => {
       }
       return 0;
     }
+    if (key === 'status') {
+      const statusOrder = { pending: 0, paid: 1, cleared: 2 };
+      return statusOrder[expense.status] ?? 99;
+    }
     return expense.position ?? 0;
   };
 
@@ -848,6 +852,13 @@ const ExpenseTrackingApp = () => {
           Sort by Date
           {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
         </button>
+        <button
+          onClick={() => handleSort('status')}
+          className={`px-2 py-1 rounded flex items-center gap-1 ${sortConfig.key === 'status' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'}`}
+        >
+          Sort by Status
+          {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />)}
+        </button>
       </div>
     );
   };
@@ -1072,16 +1083,16 @@ const ExpenseTrackingApp = () => {
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
-        setLocalExtraPayment(String(extraPayment));
+      setLocalExtraPayment(String(extraPayment));
     }, [extraPayment]);
 
     const handleBlur = () => {
-        const value = parseFloat(localExtraPayment);
-        if (!isNaN(value)) {
-            setExtraPayment(value);
-        } else {
-            setExtraPayment(0);
-        }
+      const value = parseFloat(localExtraPayment);
+      if (!isNaN(value)) {
+        setExtraPayment(value);
+      } else {
+        setExtraPayment(0);
+      }
     };
 
     const payoffData = calculateDebtPayoff();
@@ -1121,12 +1132,12 @@ const ExpenseTrackingApp = () => {
               <div>
                 <label className="block text-sm font-medium mb-1">Extra Monthly Payment</label>
                 <input
-                    type="number"
-                    value={localExtraPayment}
-                    onChange={(e) => setLocalExtraPayment(e.target.value)}
-                    onBlur={handleBlur}
-                    className="w-full p-2 border rounded"
-                    placeholder="0.00"
+                  type="number"
+                  value={localExtraPayment}
+                  onChange={(e) => setLocalExtraPayment(e.target.value)}
+                  onBlur={handleBlur}
+                  className="w-full p-2 border rounded"
+                  placeholder="0.00"
                 />
               </div>
             </div>
@@ -1492,9 +1503,9 @@ const ExpenseTrackingApp = () => {
     const [amount, setAmount] = useState('');
 
     useEffect(() => {
-        if (open) {
-            setAmount(''); // Reset amount on open
-        }
+      if (open) {
+        setAmount(''); // Reset amount on open
+      }
     }, [open]);
 
     if (!open || !expense) return null;
@@ -1516,28 +1527,28 @@ const ExpenseTrackingApp = () => {
         const period = newPeriods.find(p => p.id === periodId);
 
         const update = (exp) => {
-            if (exp.id === expense.id) {
-                const originalAmount = exp.originalAmount || exp.amount;
-                const paidAmount = (exp.paidAmount || 0) + paymentAmount;
-                const newAmount = originalAmount - paidAmount;
+          if (exp.id === expense.id) {
+            const originalAmount = exp.originalAmount || exp.amount;
+            const paidAmount = (exp.paidAmount || 0) + paymentAmount;
+            const newAmount = originalAmount - paidAmount;
 
-                return {
-                    ...exp,
-                    originalAmount: originalAmount,
-                    paidAmount: paidAmount,
-                    amount: newAmount,
-                    status: newAmount <= 0.001 ? 'paid' : 'pending' // Use a small epsilon for float comparison
-                };
-            }
-            return exp;
+            return {
+              ...exp,
+              originalAmount: originalAmount,
+              paidAmount: paidAmount,
+              amount: newAmount,
+              status: newAmount <= 0.001 ? 'paid' : 'pending' // Use a small epsilon for float comparison
+            };
+          }
+          return exp;
         };
 
         if (expense.isOneOff) {
-            if (!period.oneOffExpenses) period.oneOffExpenses = [];
-            period.oneOffExpenses = period.oneOffExpenses.map(update);
+          if (!period.oneOffExpenses) period.oneOffExpenses = [];
+          period.oneOffExpenses = period.oneOffExpenses.map(update);
         } else {
-            if (!period.expenses) period.expenses = [];
-            period.expenses = period.expenses.map(update);
+          if (!period.expenses) period.expenses = [];
+          period.expenses = period.expenses.map(update);
         }
 
         return newPeriods;
@@ -1618,9 +1629,15 @@ const ExpenseTrackingApp = () => {
       }
     };
 
+    const statusColorClass = {
+      pending: 'bg-gray-50',
+      paid: 'bg-blue-50',
+      cleared: 'bg-green-50',
+    }[expense.status] || 'bg-white';
+
     return (
       <div
-        className="bg-white border rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer select-none"
+        className={`${statusColorClass} border rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer select-none`}
         onClick={() => setExpenseModal({ open: true, expense, periodId })}
       >
         {/* Top row: description + (optional) one-off tag | amount */}
@@ -1645,9 +1662,9 @@ const ExpenseTrackingApp = () => {
           <div className="text-right pointer-events-none">
             <div className="font-semibold">{formatCurrency(expense.amount)}</div>
             {expense.originalAmount && (
-                <div className="text-xs text-gray-500">
-                    of {formatCurrency(expense.originalAmount)}
-                </div>
+              <div className="text-xs text-gray-500">
+                of {formatCurrency(expense.originalAmount)}
+              </div>
             )}
             {expense.isDebt && (
               <div className="text-xs text-purple-600">
@@ -2128,11 +2145,11 @@ const ExpenseTrackingApp = () => {
                         </button>
                       </>
                     ) : (
-                       <div className="text-xs text-gray-600 flex items-center gap-3">
-                         <span>Autosaving...</span>
-                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
-                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-                       </div>
+                      <div className="text-xs text-gray-600 flex items-center gap-3">
+                        <span>Autosaving...</span>
+                        {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
+                        {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+                      </div>
                     )}
                   </>
                 ) : (
@@ -2140,7 +2157,7 @@ const ExpenseTrackingApp = () => {
                     <Upload className="w-4 h-4" /> Sync
                   </button>
                 )}
-                 <button
+                <button
                   onClick={() => {
                     if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
                       localStorage.clear();
@@ -2195,11 +2212,11 @@ const ExpenseTrackingApp = () => {
                         </button>
                       </>
                     ) : (
-                       <div className="text-xs text-gray-600 flex items-center gap-3">
-                         <span>Autosaving...</span>
-                         {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
-                         {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-                       </div>
+                      <div className="text-xs text-gray-600 flex items-center gap-3">
+                        <span>Autosaving...</span>
+                        {lastSavedAt && <span className="text-green-700">Saved: {formatDate(lastSavedAt)}</span>}
+                        {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+                      </div>
                     )}
                   </>
                 ) : (
@@ -2207,7 +2224,7 @@ const ExpenseTrackingApp = () => {
                     <Upload className="w-4 h-4" /> Sync
                   </button>
                 )}
-                 <button
+                <button
                   onClick={() => {
                     if (window.confirm('Are you sure you want to reset all data? This cannot be undone.')) {
                       localStorage.clear();
@@ -2222,14 +2239,14 @@ const ExpenseTrackingApp = () => {
               </div>
             </div>
           )}
-           {/* Autosave status line - moved inside for better layout control */}
-            {syncHandle && (
-              <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
-                <span>Autosaving to connected file…</span>
-                {lastSavedAt && <span className="text-green-700">Last saved: {formatDate(lastSavedAt)}</span>}
-                {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
-              </div>
-            )}
+          {/* Autosave status line - moved inside for better layout control */}
+          {syncHandle && (
+            <div className="pb-2 text-xs text-gray-600 flex items-center gap-3">
+              <span>Autosaving to connected file…</span>
+              {lastSavedAt && <span className="text-green-700">Last saved: {formatDate(lastSavedAt)}</span>}
+              {lastSaveError && <span className="text-red-600">Error: {lastSaveError}</span>}
+            </div>
+          )}
         </div>
       </header>
 
